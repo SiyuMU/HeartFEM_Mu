@@ -1,0 +1,13 @@
+{
+ "mpi_ranks": 8,
+ "unknowns": 112832,
+ "nodes": 5708,
+ "tetrahedra": 19472,
+ "solve_s": 3841.5,
+ "frames": 52,
+ "mean_frame_s": 73.4,
+ "max_frame_s": 172.5,
+ "newton_its_total": 186,
+ "total_s": 3984.9,
+ "date": "2026-10-25 16:00"
+}

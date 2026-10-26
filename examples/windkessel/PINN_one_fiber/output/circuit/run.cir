@@ -1,0 +1,75 @@
+*closed-loop circulation with an FE atrium. Template: circuit.py fills the fields in double angle brackets from
+*params.CIRCUIT.
+*Structure: Cairelli's zebrafish 3 dpf circuit (heartFEM ngspice_py, 3dpf_new.cir) with the chamber roles swapped:
+*  la = imaged atrium: heartFEM table2d P-V-t source (heartFEM LV.cir, source mode 3, block copied verbatim)
+*  lv = ventricle: time-varying elastance P = E(t) (V - V0), E = E_min + (E_max - E_min) e(tau); the activation e has
+*       the shape of heartFEM's Ct (half-cosine rise over t_rise, half-cosine fall over t_fall), as in the left
+*       ventricle of Korakianitis & Shi 2006. It replaces the prescribed-flow ventricle of 3dpf_new.cir.
+*Everything else (valves, vein subcircuit, Cart, Cven, link resistances, volume integrators) as in 3dpf_new.cir.
+*ngspice >= 41: the XSPICE integrator model called `capacitor` in heartFEM's files is `capacitoric`.
+*Units: pressure mmHg (volts), flow nL/s (amperes), volume nL, time s. Time origin = atrial activation onset.
+.title zebrafish embryonic atrium FE + elastance ventricle
+.PARAM PI = 3.14159265359
+.func manmod(shorttime,period) {shorttime - floor(shorttime / period) * period}
+.func disfrompeak(xtime,peaktime,width,period) {min( abs( xtime - peaktime) , period - abs( xtime - peaktime))}
+.model valve sidiode(Roff=1meg Ron=1n Rrev=10 Vfwd=0 Vrev=1k Revepsilon=0.1 Epsilon=0.1)
+.subckt vein in out rval=100k lval=1n
+R1 1  out    r = rval
+L1 in 1    l = lval
+.ends vein
+*---- clock (LV.cir): timecyclic = time in the current cycle
+Eheartperiod heartperiod gnd vol = ' 550m '
+Bcumulativeheartphase  cumulativeheartphase gnd I = -2*PI/v(heartperiod)
+acumulativeheartphase  cumulativeheartphase gnd heartphaseconvertcap
+.model heartphaseconvertcap capacitoric (c=1 ic=0)
+Eheartphase heartphase gnd vol = ' manmod(v(cumulativeheartphase),2*PI) '
+Etime timecyclic gnd vol = 'v(heartperiod) *v(heartphase)/2/PI'
+Vlaprobe la    lagnd  dc 0
+Vlvprobe lv    lvgnd  dc 0
+*---- atrium: FE table (LV.cir source mode 3): P = passive(V) + active(V, t). The FE pressure depends only on the
+*     current volume and time (heartFEM trackphase off), so mode 3 is exact; mode 4 (relaxation-phase tracking) is not
+*     needed, and in ngspice-41 its phase integrator stops the transient at t = t0 ("timestep too small").
+Blau   lagnd   gnd  V = v(lagenerator0) + v(lagenerator1)
+alau0 gnd lavol %v(lagenerator0) lautabmod0
+.model lautabmod0 table2d (offset=0.0 gain=1 order=3 file="la_tablebase.txt")
+alau1 lavol laphasetime %v(lagenerator1) lautabmod
+.model lautabmod table2d (offset=0.0 gain=1 order=3 file="la_table.txt")
+Vpasslaphasetime laphasetime timecyclic dc 0
+*---- ventricle: time-varying elastance; lvtau = time since the start of the ventricular activation
+Elvtau lvtau gnd vol = ' manmod( v(timecyclic) - 144.870277m, v(heartperiod) ) '
+Blvact lvact gnd V = ( v(lvtau) < 232.744972m ) ? 0.5 * ( 1 - cos( PI * v(lvtau) / 232.744972m ) ) : ( ( v(lvtau) < 232.744972m + 24.3049472m ) ? 0.5 * ( 1 + cos( PI * ( v(lvtau) - 232.744972m ) / 24.3049472m ) ) : 0 )
+Blvelast lvelast gnd V = 3 + (50.4537849 - 3) * v(lvact)
+Blvu   lvgnd   gnd  V = v(lvelast) * (v(lvvol) - 117.906317m)
+*---- volume integrators (as 3dpf_new.cir / LV.cir)
+Blavol  lavol gnd I = -i(Vlaprobe)
+alavolconvert  lavol gnd lavolconvertcap
+.model lavolconvertcap capacitoric (c=1 ic=800m)
+Blvvol  lvvol gnd I = -i(Vlvprobe)
+alvvolconvert  lvvol gnd lvvolconvertcap
+.model lvvolconvertcap capacitoric (c=1 ic=500m)
+*---- valves and links (3dpf_new.cir; its nonlinear k |Q|^b terms kept at k = 0 as in Cairelli's runs)
+Vlalavalv  lavalvp1 lavalvp2 dc 0
+Blalavalv  lavalvp2 lavalv V=' 0 * ( i(Vlalavalv) ^2 )^( 0 / 2) * sgn( i(Vlalavalv) ) '
+Vlvlvvalv  lv  lvvalvp1 dc 0
+Blvlvvalv  lvvalvp1 lvvalvp2 V=' 0 * ( i(Vlvlvvalv) ^2 )^( 0 / 2) * sgn( i(Vlvlvvalv) ) '
+ala   lavalv   lv   valve
+alv   lvvalvp2 lvvalv   valve
+Cart   art    gnd    167.740789m
+Cven   ven    gnd    3.59477124
+Vvenlaprobe ven venp dc 0
+Xlalavalv  la  lavalvp1    vein  rval=530.094657m lval=0
+Xlvart     lvvalv   art    vein  rval=696.513056m   lval=0
+Xartven   art   ven     vein  rval=5.5   lval=0
+Xvenla    venp   la      vein  rval=1.21524736    lval=0
+.options savecurrents
+.ic v(art)= 3 v(ven)= 1.53284572
+.tran 10u 16.5 15.4
+.control
+set controlswait
+set filetype=ascii
+set wr_vecnames
+set wr_singlescale
+run
+wrdata out v(la) v(lavol) v(lv) v(lvvol) v(art) v(ven) i(Vlaprobe) i(Vlvprobe) i(Vlalavalv) i(Vlvlvvalv) i(Vvenlaprobe) v(laphasetime) v(lvelast) v(lvact)
+.endc
+.end

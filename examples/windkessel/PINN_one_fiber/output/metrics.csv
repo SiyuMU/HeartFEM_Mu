@@ -1,0 +1,17 @@
+part,metric,value,measured (3 dpf)
+atrium (PINN),volume max / min (nL),0.829 / 0.470,-
+,ejection fraction,43 %,-
+,pressure max / min (mmHg),3.84 / -0.22,-
+,a-wave (mmHg),3.11,-
+ventricle,EDV / ESV (nL),0.571 / 0.230,0.57 / 0.23
+,ejection fraction,60 %,55-60 %
+,EDP / peak / ESP (mmHg),1.36 / 7.53 / 5.40,1.36 / 7.52 / -
+,filling / IVC / ejection / IVR (ms),281 / 50 / 181 / 20,280 / 50 / 180 / 21
+,end-diastole / end-systole (ms),132 / 381,-
+,AV closure to contraction (ms),18,~0
+,filling during atrial contraction,84 %,mainly atrial
+circulation,arterial P min / mean / max (mmHg),4.19 / 4.92 / 5.60,mean 4.90
+,venous P mean (mmHg),1.52,-
+,stroke volume (nL) / output (nL/s),0.341 / 0.62,-
+,backflow atrium to veins (nL),0.081 (24 % of AV flow),-
+numerics,"periodicity, last two cycles (nL)",1.3e-06,-

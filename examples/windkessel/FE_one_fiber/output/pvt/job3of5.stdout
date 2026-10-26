@@ -1,0 +1,14 @@
+job3of5: 4 ranks, 112832 unknowns, V0 0.67718 nL, imaged volume 0.49599..0.94912 nL; 11 of 54 volumes (0.2392..1.0205 nL), t 0..400 ms step 5; tr = 73 ls -33
+  V[23] 0.6469 nL: P(t=0) -0.0084  max P +1.4025 kPa  stop 245 ms  Newton 186  3406 s  (total 3445 s)
+  V[18] 0.7250 nL: P(t=0) +0.0207  max P +1.7920 kPa  stop 260 ms  Newton 188  3380 s  (total 6825 s)
+  V[28] 0.5772 nL: P(t=0) -0.0212  max P +0.9859 kPa  stop 260 ms  Newton 205  4361 s  (total 11187 s)
+  V[13] 0.8125 nL: P(t=0) +0.0826  max P +2.2085 kPa  stop 275 ms  Newton 193  4012 s  (total 15198 s)
+  V[33] 0.5150 nL: P(t=0) -0.0252  max P +0.5082 kPa  stop 260 ms  Newton 232  4132 s  (total 19330 s)
+  V[ 8] 0.9106 nL: P(t=0) +0.1948  max P +2.6982 kPa  stop 285 ms  Newton 198  3253 s  (total 22583 s)
+  V[38] 0.4595 nL: P(t=0) -0.0294  max P +0.1041 kPa  stop 265 ms  Newton 249  4179 s  (total 26762 s)
+  V[ 3] 1.0205 nL: P(t=0) +0.4376  max P +3.3337 kPa  stop 290 ms  Newton 201  3289 s  (total 30051 s)
+  V[43] 0.4100 nL: P(t=0) -0.0348  max P -0.0348 kPa  stop 270 ms  Newton 282  4572 s  (total 34623 s)
+  V[48] 0.3659 nL: P(t=0) -0.0405  max P -0.0405 kPa  stop 270 ms  Newton 278  4465 s  (total 39088 s)
+  V[53] 0.2392 nL: t 75 ms FAILED (|R|/R_ref 1.2e-05); rest skipped
+  V[53] 0.2392 nL: P(t=0) -0.0622  max P -0.0622 kPa  stop nan ms  Newton 99  1683 s  (total 46418 s)
+job3of5 done in 46418 s: 10 / 11 volumes

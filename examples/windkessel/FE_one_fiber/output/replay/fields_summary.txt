@@ -1,0 +1,4 @@
+cavity V 0.473-0.830 nL, cube-root shortening 17.1 %; wall-mean ls 1.681-2.066 um (shortening 18.6 %); cell ls 5-95 % over the cycle 1.561-2.177 um
+u_max 25.8 um (cavity radius 48-58 um, wall ~10 um)
+J: volume mean 0.9985-1.0004, cells 0.354-1.361; away from the base |J - 1| > 0.2 in at most 0.19 % of the wall
+at peak P (0.512 kPa, t 48 ms): wall-mean sigma_CC 2.35, sigma_ff 2.36, sigma_LL 0.30, sigma_RR -0.28 kPa; in-plane mean 1.33 vs Laplace P r / 2h 1.39 kPa

@@ -1,0 +1,148 @@
+{
+ "C_kPa": 0.07757073337128546,
+ "T_MAX_kPa": 4.354505447561872,
+ "active_tension_at_PS_kPa": 3.2658790856714033,
+ "fibers_angle_deg_share": [
+  [
+   [
+    0.0,
+    0.0
+   ],
+   0.5
+  ],
+  [
+   [
+    90.0,
+    90.0
+   ],
+   0.5
+  ]
+ ],
+ "K_spring_over_C_per_mm": 0.0,
+ "J": 25.815542522096685,
+ "all_starts_converged": true,
+ "spread_over_starts": {
+  "C": [
+   0.07756577735162382,
+   0.07757073337128546
+  ],
+  "T_MAX": [
+   4.354113019241372,
+   4.354505447561872
+  ]
+ },
+ "geometry_start": {
+  "C": 0.076636487515166,
+  "T_MAX": 4.333433473751744
+ },
+ "starts": [
+  {
+   "factors": [
+    1.0,
+    1.0
+   ],
+   "start": {
+    "C": 0.076636487515166,
+    "T_MAX": 4.333433473751744
+   },
+   "stage_A": {
+    "J_frame": 12.200642926413098,
+    "evaluations": 26,
+    "converged": true
+   },
+   "stage_B": {
+    "J_frame": 13.614906575114796,
+    "evaluations": 26,
+    "converged": true
+   },
+   "J": 25.815549501527894,
+   "C": 0.07756825532187313,
+   "T_MAX": 4.354113019241372,
+   "converged": true,
+   "seconds": 18.5
+  },
+  {
+   "factors": [
+    0.5,
+    2.0
+   ],
+   "start": {
+    "C": 0.038318243757583,
+    "T_MAX": 8.666866947503488
+   },
+   "stage_A": {
+    "J_frame": 12.200642462663085,
+    "evaluations": 26,
+    "converged": true
+   },
+   "stage_B": {
+    "J_frame": 13.61490770363441,
+    "evaluations": 28,
+    "converged": true
+   },
+   "J": 25.815550166623254,
+   "C": 0.07756577735162382,
+   "T_MAX": 4.354252118762996,
+   "converged": true,
+   "seconds": 21.2
+  },
+  {
+   "factors": [
+    2.0,
+    0.5
+   ],
+   "start": {
+    "C": 0.153272975030332,
+    "T_MAX": 2.166716736875872
+   },
+   "stage_A": {
+    "J_frame": 12.200638810786018,
+    "evaluations": 28,
+    "converged": true
+   },
+   "stage_B": {
+    "J_frame": 13.614903711310667,
+    "evaluations": 26,
+    "converged": true
+   },
+   "J": 25.815542522102668,
+   "C": 0.07757073337128546,
+   "T_MAX": 4.354505447561872,
+   "converged": true,
+   "seconds": 20.9
+  }
+ ],
+ "frames": {
+  "ED": {
+   "frame": 43,
+   "Ct": 0.0,
+   "P_kPa": 0.1813,
+   "cavity_volume_nL": 0.9474953985773027,
+   "image_volume_nL": 0.9491153193734089,
+   "J": 12.200638810786018
+  },
+  "PS": {
+   "frame": 51,
+   "Ct": 0.7499999999999999,
+   "P_kPa": 0.2738,
+   "cavity_volume_nL": 0.693301553837955,
+   "image_volume_nL": 0.6942446649298375,
+   "J": 13.614903711310667
+  }
+ },
+ "reference_cavity_volume_nL": 0.677181757055223,
+ "network_inputs_at_result": {
+  "p_ED": 2.33722168297963,
+  "p_PS": 3.5296817253161765,
+  "a_PS": 42.10194932719743
+ },
+ "training_domain": {
+  "p_max": 10.0,
+  "a_max": 110.0
+ },
+ "inside_training_domain": true,
+ "solver": "PINN (cuda)",
+ "evaluations": 163,
+ "seconds": 97.0,
+ "date": "2026-10-25 18:16"
+}

@@ -1,0 +1,138 @@
+{
+ "C_kPa": 0.07704275697207293,
+ "T_MAX_kPa": 4.368190928394314,
+ "active_tension_at_PS_kPa": 3.2761431962957346,
+ "fibers_angle_deg_share": [
+  [
+   [
+    0.0,
+    0.0
+   ],
+   0.5
+  ],
+  [
+   [
+    90.0,
+    90.0
+   ],
+   0.5
+  ]
+ ],
+ "K_spring_kPa_per_mm": 0.0,
+ "J": 25.723237072169503,
+ "all_starts_converged": true,
+ "spread_over_starts": {
+  "C": [
+   0.07704275697207293,
+   0.07704970069622327
+  ],
+  "T_MAX": [
+   4.367264120901387,
+   4.368584625531266
+  ]
+ },
+ "geometry_start": {
+  "C": 0.0760987205156795,
+  "T_MAX": 4.345322263417822
+ },
+ "starts": [
+  {
+   "factors": [
+    1.0,
+    1.0
+   ],
+   "start": {
+    "C": 0.0760987205156795,
+    "T_MAX": 4.345322263417822
+   },
+   "stage_A": {
+    "J_frame": 12.145941843437585,
+    "evaluations": 26,
+    "converged": true
+   },
+   "stage_B": {
+    "J_frame": 13.577295228562281,
+    "evaluations": 27,
+    "converged": true
+   },
+   "J": 25.72323707199987,
+   "C": 0.07704275697207293,
+   "T_MAX": 4.368190928394314,
+   "converged": true,
+   "seconds": 3517.8
+  },
+  {
+   "factors": [
+    0.5,
+    2.0
+   ],
+   "start": {
+    "C": 0.03804936025783975,
+    "T_MAX": 8.690644526835644
+   },
+   "stage_A": {
+    "J_frame": 12.145952222244913,
+    "evaluations": 27,
+    "converged": true
+   },
+   "stage_B": {
+    "J_frame": 13.577470341860995,
+    "evaluations": 28,
+    "converged": true
+   },
+   "J": 25.72342256410535,
+   "C": 0.07704970069622327,
+   "T_MAX": 4.367264120901387,
+   "converged": true,
+   "seconds": 3870.8
+  },
+  {
+   "factors": [
+    2.0,
+    0.5
+   ],
+   "start": {
+    "C": 0.152197441031359,
+    "T_MAX": 2.172661131708911
+   },
+   "stage_A": {
+    "J_frame": 12.145947957389092,
+    "evaluations": 28,
+    "converged": true
+   },
+   "stage_B": {
+    "J_frame": 13.577360678376996,
+    "evaluations": 29,
+    "converged": true
+   },
+   "J": 25.72330863576608,
+   "C": 0.07704521823354961,
+   "T_MAX": 4.368584625531266,
+   "converged": true,
+   "seconds": 3677.5
+  }
+ ],
+ "frames": {
+  "ED": {
+   "frame": 43,
+   "Ct": 0.0,
+   "P_kPa": 0.1813,
+   "cavity_volume_nL": 0.9474678813359303,
+   "image_volume_nL": 0.9491153786826417,
+   "J": 12.145941843607233
+  },
+  "PS": {
+   "frame": 51,
+   "Ct": 0.7499999999999999,
+   "P_kPa": 0.2738,
+   "cavity_volume_nL": 0.6932397264168785,
+   "image_volume_nL": 0.6942447083124672,
+   "J": 13.577295228562273
+  }
+ },
+ "reference_cavity_volume_nL": 0.6771817993716093,
+ "solver": "FE, 8 MPI ranks",
+ "evaluations": 168,
+ "seconds": 11848.6,
+ "date": "2026-10-25 19:20"
+}

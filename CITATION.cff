@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "HeartFEM_Mu"
+abstract: "Mechanics of a beating heart-chamber wall reconstructed from 4D images, solved by finite elements (legacy FEniCS) or by a physics-informed neural network, with the material and activation laws of heartFEM: volume-driven P-V cycle, Windkessel (closed-loop circulation) coupling, and inversion of the passive stiffness and peak active tension."
+authors:
+  - family-names: "Mu"
+    given-names: "Siyu"
+version: "1.0.0"
+date-released: "2026-10-26"
+license: MIT
+repository-code: "https://github.com/SiyuMU/HeartFEM_Mu"
+keywords:
+  - cardiac mechanics
+  - finite elements
+  - physics-informed neural network
+  - zebrafish heart
+  - Windkessel

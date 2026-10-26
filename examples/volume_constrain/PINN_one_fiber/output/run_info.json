@@ -1,0 +1,12 @@
+{
+ "device": "cuda",
+ "nodes": 5708,
+ "tetrahedra": 19472,
+ "p2_dofs": 35706,
+ "pressure_solve_s": 0.93,
+ "stress_mean_frame_s": 9.3,
+ "total_s": 621.5,
+ "model": "model.pt",
+ "model_train_clock_s": 5705.657021522522,
+ "date": "2026-10-25 20:35"
+}

@@ -1,0 +1,81 @@
+
+Note: No compatibility mode selected!
+
+
+Circuit: zebrafish embryonic atrium FE + elastance ventricle
+
+Reducing trtol to 1 for xspice 'A' devices
+Doing analysis at TEMP = 27.000000 and TNOM = 27.000000
+
+
+Initial Transient Solution
+--------------------------
+
+Node                                   Voltage
+----                                   -------
+heartperiod                               0.55
+eheartperiod_int1                         0.55
+cumulativeheartphase                         0
+heartphase                                   0
+eheartphase_int1                             0
+timecyclic                                   0
+etime_int1                                   0
+la                                    0.544708
+lagnd                                 0.544708
+lv                                     1.14628
+lvgnd                                  1.14628
+lagenerator0                          0.544708
+lagenerator1                                 0
+lavol                                      0.8
+laphasetime                                  0
+lvtau                                  0.40513
+elvtau_int1                            0.40513
+lvact                                        0
+lvelast                                      3
+lvvol                                      0.5
+lavalvp1                              0.544708
+lavalvp2                              0.544708
+lavalv                                0.544708
+lvvalvp1                               1.14628
+lvvalvp2                               1.14628
+lvvalv                                       3
+art                                          3
+ven                                    1.53285
+venp                                   1.53284
+xlalavalv.1                           0.544708
+xlvart.1                                     3
+xartven.1                                    3
+xvenla.1                               1.53284
+blvlvvalv#branch                  -1.85372e-06
+vlvlvvalv#branch                  -1.85372e-06
+blalavalv#branch                  -6.01573e-07
+vlalavalv#branch                  -6.01573e-07
+vlvprobe#branch                    1.25214e-06
+vlaprobe#branch                       0.813117
+blvu#branch                        1.25214e-06
+blvelast#branch                              0
+blvact#branch                                0
+belvtau#branch                               0
+blau#branch                           0.813117
+betime#branch                                0
+beheartphase#branch                          0
+beheartperiod#branch                         0
+l.xvenla.l1#branch                    0.813116
+l.xartven.l1#branch                   0.266755
+l.xlvart.l1#branch                -1.85372e-06
+l.xlalavalv.l1#branch             -6.01573e-07
+elvtau#branch                                0
+etime#branch                                 0
+eheartphase#branch                           0
+eheartperiod#branch                          0
+vvenlaprobe#branch                    0.813116
+vpasslaphasetime#branch                      0
+alvvolconvert#branch_0_0           1.25214e-06
+alavolconvert#branch_0_0              0.813117
+acumulativeheartphase#branch_0_0          11.424
+alau1#branch_2_0                             0
+alau0#branch_2_0                             0
+
+
+No. of Data Rows : 110001
+Note: Simulation executed from .control section 

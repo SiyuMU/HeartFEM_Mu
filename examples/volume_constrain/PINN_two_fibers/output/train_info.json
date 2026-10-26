@@ -1,0 +1,26 @@
+{
+ "train_clock_s": 6547.0,
+ "lbfgs_outer_steps": 125,
+ "adam_steps": 1000,
+ "stopped_by": "objective window",
+ "whiten": 1e-05,
+ "whiten_from_outer": 101,
+ "grid_stages": [
+  [
+   4,
+   1
+  ],
+  [
+   6,
+   42
+  ],
+  [
+   8,
+   6,
+   101
+  ]
+ ],
+ "lbfgs_history": 100,
+ "device": "cuda",
+ "weights": 14689352
+}

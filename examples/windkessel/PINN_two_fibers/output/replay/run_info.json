@@ -1,0 +1,19 @@
+{
+ "device": "cuda",
+ "nodes": 5708,
+ "tetrahedra": 19472,
+ "p2_dofs": 35706,
+ "states": 52,
+ "states_outside_trained_range": 0,
+ "cycle_samples_near_clipped_table_entries": 54,
+ "cycle_samples": 550,
+ "pressure_solve_s": 0.42,
+ "mean_state_s": 9.68,
+ "max_abs_dP_mmHg": 0.0043878762184248465,
+ "rms_dP_mmHg": 0.0017378758174204077,
+ "max_abs_dV_nL": 1.7633028170926934e-07,
+ "total_s": 566.5,
+ "model": "model.pt",
+ "model_train_clock_s": 13936.256054401398,
+ "date": "2026-10-25 21:45"
+}
