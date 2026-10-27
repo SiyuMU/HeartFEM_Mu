@@ -323,7 +323,9 @@ every state; 13 of the 52 states): the cavity pressure is up to 0.3 mmHg (40 %) 
   here), 0.16 % (C x 10) and 0.12 % (C x 0.1) on a 5 um mesh, 0.07 % and 0.08 % on a 3.5 um mesh. With the myocardial
   values in the layer and one continuous p, the two-region forms give the single-region forms to 2e-15 (hemisphere)
   and 6e-15 (this atrium, meshed from input surfaces of the same geometry as the grown layer). The step `preprocess`
-  gives the same mesh in every run.
+  gives the same mesh in every run. The whole run from these input surfaces (all 9 steps) gives this example's
+  circuit results within 0.6 % and its event times within 1 ms (atrial peak P 3.659 vs 3.664 mmHg, lumen
+  0.437-0.737 vs 0.438-0.740 nL, cardiac output 0.5935 vs 0.5939 nL/s).
 - **Table vs FE.** In the replay, the FE pressure of the 52 coupled states differs from the table pressure used by the
   circuit by at most 0.0026 mmHg (rms 0.0012).
 - **Numerics** (step `circuit_check`). Half the time step: metrics change by <= 1.5e-04; twice the cycles: <= 2e-07;
