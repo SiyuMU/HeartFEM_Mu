@@ -1,0 +1,5 @@
+job5of18: 1 ranks, 172612 unknowns, V0 0.60228 nL, imaged volume 0.42109..0.87422 nL; 3 of 54 volumes (0.3953..0.8981 nL), t 0..400 ms step 5; tr = 73 ls -33; endocardial layer 0.07490 nL
+  V[23] 0.5958 nL: P(t=0) -0.0029  max P +1.7007 kPa  stop 240 ms  Newton 164  5302 s  (total 5310 s)
+  V[ 5] 0.8981 nL: P(t=0) +0.4255  max P +3.0383 kPa  stop 280 ms  Newton 167  5758 s  (total 11068 s)
+  V[41] 0.3953 nL: P(t=0) -0.0553  max P -0.0553 kPa  stop 265 ms  Newton 209  7088 s  (total 18156 s)
+job5of18 done in 18156 s: 3 / 3 volumes

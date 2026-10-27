@@ -42,6 +42,9 @@ class Step:
 
 
 PREPROCESS = Step("preprocess", "preprocess.main", "raw surfaces -> tetrahedral mesh, local frame, cut surfaces")
+ENDO_LAYER = Step("endo_layer", "myo_endo.grow_layer", "endocardial layer grown on the mesh (WALL = myo_endo)")
+PREPROCESS_LAYERS = Step("preprocess", "myo_endo.preprocess_layers",
+                         "raw surfaces of both layers -> two-region tetrahedral mesh, local frame (WALL = myo_endo)")
 PIPELINES = {
     ("volume_constrain", "FE"): (
         PREPROCESS,
@@ -127,6 +130,16 @@ FIBER_SETTINGS = {  # the fiber settings that TWO_FIBERS selects; params.py need
     False: _names("FIBER_ANGLE_DEG"),
     True: _names("FIBER_ANGLES_DEG FIBER_WEIGHTS"),
 }
+# Wall (optional setting WALL): "myo" (myocardium only; also when WALL is absent) or "myo_endo" (myocardium + endocardial
+# layer, windkessel FE only), which needs these settings in addition; ENDO_MATERIAL holds the layer's values of the
+# keys below and its fiber settings of the TWO_FIBERS case. ENDO_GROW selects where the layer comes from: True, grown
+# from the myocardial mesh (step endo_layer; needs GROW_SETTINGS); False, the input surface has both layers (step
+# preprocess meshes them; GROW_SETTINGS not read).
+WALLS = ("myo", "myo_endo")
+WALL_MODES = {("windkessel", "FE")}  # the modes that accept WALL = "myo_endo"
+WALL_SETTINGS = _names("ENDO_GROW ENDO_PRESSURE_JUMP ENDO_MATERIAL")
+GROW_SETTINGS = _names("ENDO_THICKNESS_UM ENDO_SUBLAYERS")
+ENDO_MATERIAL_KEYS = _names("C C_FF C_SS C_NN C_NS C_FS C_FN T_MAX")
 
 
 def load(example):
@@ -146,13 +159,34 @@ def load(example):
     if not isinstance(two, bool):
         raise ValueError(f"{params_file}: TWO_FIBERS must be True or False, got {two!r}")
     expected = set(PARAMETERS[task, solver]) | set(FIBER_SETTINGS[two])
+    wall = values.get("WALL", "myo")
+    if wall not in WALLS:
+        raise ValueError(f"{params_file}: WALL must be one of {WALLS}, got {wall!r}")
+    not_read = set(FIBER_SETTINGS[not two])  # the other case's fiber settings: not read
+    if wall == "myo_endo":
+        if (task, solver) not in WALL_MODES:
+            raise ValueError(f"{params_file}: WALL = 'myo_endo' (myocardium + endocardium) is available for TASK = "
+                             f"'windkessel', SOLVER = 'FE' only, got TASK = {task!r}, SOLVER = {solver!r}")
+        grow = values.get("ENDO_GROW")
+        if not isinstance(grow, bool):
+            raise ValueError(f"{params_file}: ENDO_GROW must be True (layer grown from the myocardial mesh) or False "
+                             f"(the input surface has both layers), got {grow!r}")
+        expected |= set(WALL_SETTINGS) | (set(GROW_SETTINGS) if grow else set())
+        not_read |= set() if grow else set(GROW_SETTINGS)
     missing = sorted(expected - set(values))
-    unknown = sorted(set(values) - expected - set(FIBER_SETTINGS[not two]))  # the other case's fiber settings: not read
+    unknown = sorted(set(values) - expected - not_read - {"WALL"})
     if missing or unknown:
         raise ValueError(f"{params_file}: settings do not fit TASK = {task!r}, SOLVER = {solver!r}"
                          + (f"; missing: {', '.join(missing)}" if missing else "")
                          + (f"; unknown: {', '.join(unknown)}" if unknown else "")
                          + " (start from the params.py of the example of this mode)")
+    if wall == "myo_endo":
+        keys = set(ENDO_MATERIAL_KEYS) | set(FIBER_SETTINGS[two])
+        m = values["ENDO_MATERIAL"]
+        if not isinstance(m, dict) or set(m) != keys:
+            raise ValueError(f"{params_file}: ENDO_MATERIAL must be a dict with the keys {', '.join(sorted(keys))}"
+                             + (f"; missing: {', '.join(sorted(keys - set(m)))}; unknown: {', '.join(sorted(set(m) - keys))}"
+                                if isinstance(m, dict) else ""))
     cfg = SimpleNamespace(**values)
     cfg.root, cfg.params_file = root, params_file
     cfg.input, cfg.output = root / cfg.INPUT_DIR, root / cfg.OUTPUT_DIR
@@ -226,13 +260,27 @@ def step_process(cfg, step, base, args=()):
     return script + "exec " + shlex.join(cmd), env
 
 
+def pipeline(cfg):
+    """The steps of the example's mode; WALL = "myo_endo" adds the step endo_layer after preprocess (ENDO_GROW) or meshes
+    both layers in the step preprocess (ENDO_GROW False)."""
+    steps = PIPELINES[cfg.TASK, cfg.SOLVER]
+    if getattr(cfg, "WALL", "myo") == "myo_endo":
+        steps = steps[:1] + (ENDO_LAYER,) + steps[1:] if cfg.ENDO_GROW else (PREPROCESS_LAYERS,) + steps[1:]
+    return steps
+
+
 def run_steps(cfg, steps):
     base = conda_base()
-    print(f"== {cfg.root.name}: TASK {cfg.TASK}, SOLVER {cfg.SOLVER}, fibers: {'two families' if cfg.TWO_FIBERS else 'one family'}; "
-          f"steps {', '.join(s.name for s in steps)}", flush=True)
+    print(f"== {cfg.root.name}: TASK {cfg.TASK}, SOLVER {cfg.SOLVER}, fibers: {'two families' if cfg.TWO_FIBERS else 'one family'}"
+          + ("; wall: myocardium + endocardial layer" + (" (grown)" if cfg.ENDO_GROW else " (from the input surface)")
+             if getattr(cfg, "WALL", "myo") == "myo_endo" else "")
+          + f"; steps {', '.join(s.name for s in steps)}", flush=True)
     unused = [k for k in FIBER_SETTINGS[not cfg.TWO_FIBERS] if hasattr(cfg, k)]
     if unused:
         print(f"   ({', '.join(unused)} in params.py not used: TWO_FIBERS = {cfg.TWO_FIBERS})", flush=True)
+    unused = [k for k in GROW_SETTINGS if getattr(cfg, "WALL", "myo") == "myo_endo" and not cfg.ENDO_GROW and hasattr(cfg, k)]
+    if unused:
+        print(f"   ({', '.join(unused)} in params.py not used: ENDO_GROW = False)", flush=True)
     t0 = time.time()
     for i, step in enumerate(steps, 1):
         print(f"== step {i}/{len(steps)}: {step.name} ({step.about}) {time.strftime('%F %T')}", flush=True)
@@ -260,7 +308,7 @@ def run_steps(cfg, steps):
 def run(main_file, argv=()):
     """Entry of main.py: the example is the folder of main_file."""
     cfg = load(Path(main_file).resolve().parent)
-    steps = PIPELINES[cfg.TASK, cfg.SOLVER]
+    steps = pipeline(cfg)
     names = [s.name for s in steps]
     argv = list(argv)
     if argv[:1] in (["--list"], ["-l"]):
@@ -278,7 +326,7 @@ def run(main_file, argv=()):
         chosen = [s for s in steps if s.name in argv]
     else:
         chosen = steps
-    if chosen[0] is PREPROCESS:
+    if chosen[0].name == PREPROCESS.name:
         check_input(cfg)
     if cfg.SOLVER == "FE" or any(s.fenics for s in chosen):
         cpus = cpu_list(cfg.CPUS)
@@ -291,6 +339,6 @@ def run(main_file, argv=()):
 def run_step(example, name, args):
     """One step in this process (python -m heartfem_mu <example> <step> [args]; started by run_steps)."""
     cfg = load(example)
-    step = {s.name: s for s in PIPELINES[cfg.TASK, cfg.SOLVER]}[name]
+    step = {s.name: s for s in pipeline(cfg)}[name]
     module, function = step.function.rsplit(".", 1)
     getattr(importlib.import_module(f"heartfem_mu.{module}"), function)(cfg, *step.args, *args)

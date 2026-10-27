@@ -5,8 +5,8 @@ abstract: "Mechanics of a beating heart-chamber wall reconstructed from 4D image
 authors:
   - family-names: "Mu"
     given-names: "Siyu"
-version: "1.0.0"
-date-released: "2026-10-26"
+version: "1.1.0"
+date-released: "2026-10-27"
 license: MIT
 repository-code: "https://github.com/SiyuMU/HeartFEM_Mu"
 keywords:

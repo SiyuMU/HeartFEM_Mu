@@ -1,0 +1,5 @@
+cavity (lumen) V 0.438-0.740 nL, cube-root shortening 16.0 %; myocardial wall-mean ls 1.853-2.068 um (shortening 10.4 %); myocardial cell ls 5-95 % over the cycle 1.785-2.198 um
+u_max 14.6 um (cavity radius 47-56 um, wall incl. layer ~12 um)
+J (all cells): volume mean 0.9985-1.0003, cells 0.844-1.230; away from the base |J - 1| > 0.2 in at most 0.00 % of the wall
+at peak P (0.489 kPa, t 48 ms): myocardial wall-mean sigma_CC 1.73, sigma_ff 1.73, sigma_LL 1.03, sigma_RR -0.29 kPa; in-plane mean of the whole wall 0.94 vs Laplace P r / 2h 1.06 kPa
+endocardial layer at peak P: mean sigma_CC -1.42, sigma_LL -1.69, sigma_RR -0.54 kPa; most compressed over the cycle: sigma_CC -8.86 kPa (t 122 ms)

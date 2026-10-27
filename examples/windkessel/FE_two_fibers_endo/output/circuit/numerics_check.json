@@ -1,0 +1,10 @@
+{
+ "half_step": {
+  "max_abs_change": 0.00015198480000044867,
+  "max_timing_change_ms": 0.0
+ },
+ "double_cycles": {
+  "max_abs_change": 1.8999985940126862e-07,
+  "max_timing_change_ms": 0.0
+ }
+}

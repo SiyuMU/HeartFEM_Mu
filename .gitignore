@@ -1,7 +1,7 @@
 __pycache__/
 *.pyc
 
-# Large example outputs: in the release archives heartfem_mu_v1.0.0_outputs_<task>.tar.gz (see README.md, Examples),
+# Large example outputs: in the release archives heartfem_mu_v<version>_outputs_*.tar.gz (see README.md, Examples),
 # or recomputed from input/ by `python main.py`.
 examples/*/*/output/mesh/
 examples/*/*/cache/

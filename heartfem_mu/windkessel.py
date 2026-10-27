@@ -80,12 +80,16 @@ def fe_sweep(cfg, job, n_jobs):
     pb = fe.VolumeProblem(cfg, comm, g, R, mesh_h5)
     V0_nl = pb.V0 * 1e3
     edv, esv = cfg.IMAGED_V_MAX_NL, cfg.IMAGED_V_MIN_NL  # imaged cavity volumes (nL)
+    layer = model.myo_endo(cfg)
+    if layer:  # the imaged volumes are inside the myocardium; the cavity is the lumen (the incompressible layer shifts it)
+        edv, esv = edv - pb.endo_volume * 1e3, esv - pb.endo_volume * 1e3
     vgrid = volume_grid(cfg, edv, esv)
     mine = np.arange(len(vgrid))[job::n_jobs]
     mine = mine[np.argsort(np.abs(np.log(vgrid[mine] / V0_nl)))]  # outward from the reference volume V0
     log(f"{name}: {comm.size} ranks, {pb.W.dim()} unknowns, V0 {V0_nl:.5f} nL, imaged volume {esv:.5f}..{edv:.5f} nL; "
         f"{len(mine)} of {len(vgrid)} volumes ({vgrid[mine].min():.4f}..{vgrid[mine].max():.4f} nL), "
-        f"t 0..{T_GRID[-1]:g} ms step {cfg.SWEEP_DT_MS:g}; tr = {cfg.TR_M_MS_PER_UM:g} ls {cfg.TR_B_MS:+g}")
+        f"t 0..{T_GRID[-1]:g} ms step {cfg.SWEEP_DT_MS:g}; tr = {cfg.TR_M_MS_PER_UM:g} ls {cfg.TR_B_MS:+g}"
+        + (f"; endocardial layer {pb.endo_volume * 1e3:.5f} nL" if layer else ""))
     nV, nT = len(vgrid), len(T_GRID)
     P = np.full((nV, nT), np.nan)
     Ctm = np.full((nV, nT), np.nan)
@@ -126,7 +130,10 @@ def fe_sweep(cfg, job, n_jobs):
                     break
                 current = tgt
             P[i, j] = fe.assemble(pb.P * fe.dx(pb.mesh)) / pb.wall_volume
-            Ctm[i, j] = fe.assemble(pb.Ct * fe.dx(pb.mesh)) / pb.wall_volume
+            if layer:  # the stop rule follows the activation of the myocardium
+                Ctm[i, j] = pb.myo_mean(pb.Ct)
+            else:
+                Ctm[i, j] = fe.assemble(pb.Ct * fe.dx(pb.mesh)) / pb.wall_volume
             its[i, j], secs[i, j] = n_it, time.time() - t0
             zero_count = zero_count + 1 if (t > cfg.T0_MS and Ctm[i, j] < 1e-12) else 0
             if zero_count >= 2:  # heartFEM: stop once the pressure no longer changes; the rest is passive

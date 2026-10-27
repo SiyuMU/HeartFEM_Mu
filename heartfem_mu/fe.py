@@ -15,6 +15,13 @@ the volume-driven problem the cavity pressure P (one number).
                     sigma_ff = family 1, sigma_ff2 = family 2; Ct = sum_i w_i Ct_i.
     Boundaries:     base u.n = 0; no rigid translation in the base plane and no rotation; epicardial spring
                     K (u.N) N with K = K_SPRING (heartFEM; default 0: none).
+    Myocardium + endocardium (WALL = "myo_endo", windkessel; mesh, regions and fibers: myo_endo.py): the same laws in
+                    both regions with the values per cell (DG0 fields): C, C_ij, T_MAX and the fiber shares of the
+                    myocardium (params) or of the layer (ENDO_MATERIAL); the activation timing is shared. The cavity is
+                    the lumen (inside the layer). ENDO_PRESSURE_JUMP: one hydrostatic pressure field per region,
+                    p = chi p_myo + (1 - chi) p_endo (chi = 1 in the myocardium), so p can jump at the interface where
+                    the two incompressible materials differ; the p rows a region does not use are zero and get a unit
+                    diagonal. Wall means (T_mean) are those of the myocardium.
 Two problems:
     VolumeProblem    (volume_constrain, windkessel) the cavity volume is prescribed: P is the Lagrange multiplier of
                      V(u) = V_target, V(u) = -1/3 int_endo (X + u) . cof(F) N dS. A state is the pair (V, activation
@@ -57,6 +64,9 @@ def log(*args):
 def geometry(cfg):
     """Mesh (mm), boundary facets (base / endo / epi), base plane, local frame; fibers (volume_constrain, windkessel) or
     the transmural depth (invert_para: fibers built by PressureProblem); frame volume ratios (volume_constrain)."""
+    if model.myo_endo(cfg):  # myocardium + endocardial layer (windkessel)
+        from . import myo_endo
+        return myo_endo.fe_geometry(cfg)
     w = model.read_wall(cfg)
     points, cells = w["points"], w["cells"]
     labels = {tuple(f): ENDO_ID for f in np.sort(w["endo"], 1)}
@@ -152,12 +162,17 @@ class Newton:
         dw = self.w.vector().copy()
         while res > tol and it < max_iter:
             it += 1
-            if self.A is None:
+            p_jump = getattr(self, "p_jump", False)  # WALL = "myo_endo" with ENDO_PRESSURE_JUMP
+            if self.A is None and p_jump:
+                self.A = assemble(self.Jac, keep_diagonal=True)
+            elif self.A is None:
                 self.A = assemble(self.Jac)
             else:
                 assemble(self.Jac, tensor=self.A)
             for bc in self.bcs:
                 bc.apply(self.A)
+            if p_jump:
+                self.A.ident_zeros()  # the p DOFs a region does not use (their residual entries are 0)
             if self.ksp is None:
                 self.ksp = PETSc.KSP().create(self.mesh.mpi_comm())
                 self.ksp.setType("preonly")
@@ -194,11 +209,14 @@ class VolumeProblem(Newton):
         normals = [self.cell_field(DG0v, n @ R.T) for n in g["normals"]]
         self.f0 = self.fibers[0]
         weights = g["weights"]
+        layer = self.myo_endo_fields(cfg, g) if "region" in g else None  # WALL = "myo_endo"
 
         def mix(terms):
             """sum_i w_i terms_i over the fiber families (one family: the term itself, unchanged form)."""
             if len(terms) == 1:
                 return terms[0]
+            if layer is not None:  # shares per cell
+                return reduce(operator.add, [wi * x for wi, x in zip(layer["weights"], terms)])
             return reduce(operator.add, [Constant(float(wi)) * x for wi, x in zip(weights, terms)])
         ds = dolfin.ds(domain=mesh, subdomain_data=marker)
         N, X = FacetNormal(mesh), SpatialCoordinate(mesh)
@@ -207,11 +225,19 @@ class VolumeProblem(Newton):
         Ve = VectorElement("CG", mesh.ufl_cell(), 2)
         Qe = FiniteElement("CG", mesh.ufl_cell(), 1)
         Re = FiniteElement("Real", mesh.ufl_cell(), 0)
-        self.W = W = FunctionSpace(mesh, MixedElement([Ve, Qe, Re, MixedElement([Re] * 5)]))
+        self.p_jump = layer is not None and cfg.ENDO_PRESSURE_JUMP
+        if self.p_jump:  # one hydrostatic pressure per region
+            self.W = W = FunctionSpace(mesh, MixedElement([Ve, Qe, Qe, Re, MixedElement([Re] * 5)]))
+        else:
+            self.W = W = FunctionSpace(mesh, MixedElement([Ve, Qe, Re, MixedElement([Re] * 5)]))
         self.bcs = [DirichletBC(W.sub(0).sub(2), Constant(0.0), marker, BASE_ID)]
         self.w = w = Function(W)
         wt, dw = TestFunction(W), TrialFunction(W)
-        u, p, P, c = split(w)
+        if self.p_jump:
+            u, p_myo, p_endo, P, c = split(w)
+            p = layer["chi"] * p_myo + (1.0 - layer["chi"]) * p_endo
+        else:
+            u, p, P, c = split(w)
         v = TestFunctions(W)[0]
         self.u, self.p, self.P = u, p, P
 
@@ -221,6 +247,8 @@ class VolumeProblem(Newton):
         E = 0.5 * (F.T * F - I)
         self.F, self.J = F, J
         Cs = [Constant(x) for x in (cfg.C, cfg.C_FF, cfg.C_SS, cfg.C_NN, cfg.C_NS, cfg.C_FS, cfg.C_FN)]
+        if layer is not None:
+            Cs = layer["Cs"]
 
         def sym(a, b):
             return outer(a, b) + outer(b, a)
@@ -252,12 +280,19 @@ class VolumeProblem(Newton):
         self.Ct_family = [ct for ct, _ in act]
         self.Ct = mix(self.Ct_family)  # share-weighted activation (one family: its Ct)
         S_unit = mix([su for _, su in act])  # used for R_ref only
-        self.S_act = mix([Constant(cfg.T_MAX) * ct * su for ct, su in act])
+        if layer is not None:
+            self.S_act = mix([layer["T_MAX"] * ct * su for ct, su in act])
+        else:
+            self.S_act = mix([Constant(cfg.T_MAX) * ct * su for ct, su in act])
 
         dsendo = ds(ENDO_ID)
         V_u = -Constant(1.0 / 3.0) * inner(u + X, cofac(F) * N)
         self.vol_form = V_u * dsendo
         self.wall_volume = assemble(Constant(1.0) * dx(mesh))
+        if layer is not None:
+            self.chi = layer["chi"]
+            self.myo_volume = assemble(self.chi * dx(mesh))
+            self.endo_volume = self.wall_volume - self.myo_volume  # reference layer volume, mm^3
         h = (self.wall_volume / mesh.num_entities_global(3)) ** (1 / 3)
         sc = Constant(2 * cfg.C * cfg.C_FF / h ** 2)  # scales the multiplier rows only
         energy = (W_pas - p * (J - 1.0)) * dx \
@@ -274,6 +309,22 @@ class VolumeProblem(Newton):
         for bc in self.bcs:
             bc.apply(b)
         self.R_ref = b.norm("l2")
+
+    def myo_endo_fields(self, cfg, g):
+        """WALL = "myo_endo": C, C_ij, T_MAX and the fiber shares as DG0 fields (myocardium: params; layer:
+        ENDO_MATERIAL) and the myocardium indicator chi."""
+        DG0 = FunctionSpace(self.mesh, "DG", 0)
+        myo, m = g["region"] == 1, cfg.ENDO_MATERIAL
+
+        def per_cell(key):
+            return self.cell_field(DG0, np.where(myo, float(getattr(cfg, key)), float(m[key])))
+        return {"Cs": [per_cell(k) for k in ("C", "C_FF", "C_SS", "C_NN", "C_NS", "C_FS", "C_FN")],
+                "T_MAX": per_cell("T_MAX"), "weights": [self.cell_field(DG0, w_) for w_ in g["cell_weights"]],
+                "chi": self.cell_field(DG0, myo.astype(float))}
+
+    def myo_mean(self, expr):
+        """WALL = "myo_endo": mean of expr over the myocardium."""
+        return assemble(self.chi * expr * dx(self.mesh)) / self.myo_volume
 
     def cell_field(self, V, values):
         """DG0 function from per-cell values given in t0.vtu cell order."""
@@ -404,7 +455,10 @@ def solve_states(cfg, g, R, mesh_h5, order, x, volume, out, name, describe, row)
             raise RuntimeError(f"{name} {k} did not converge")
         P = assemble(pb.P * dx(mesh)) / pb.wall_volume
         V = assemble(pb.vol_form)
-        T_mean = cfg.T_MAX * assemble(pb.Ct * dx(mesh)) / pb.wall_volume
+        if "region" in g:  # WALL = "myo_endo": tension of the myocardium
+            T_mean = cfg.T_MAX * pb.myo_mean(pb.Ct)
+        else:
+            T_mean = cfg.T_MAX * assemble(pb.Ct * dx(mesh)) / pb.wall_volume
         log(f"{describe(k, V)}  mean T {T_mean:6.3f} kPa  ->  P {P:+.4f} kPa  "
             f"({its} Newton its, |R|/R_ref {rr / pb.R_ref:.0e}, {time.time() - t0:.0f} s)")
         u = nodal_u()
@@ -426,6 +480,10 @@ def material_record(cfg, g, onset=None):
          "T_max": cfg.T_MAX, "t0_ms": cfg.T0_MS, "tr_m_ms_per_um": cfg.TR_M_MS_PER_UM, "tr_b_ms": cfg.TR_B_MS,
          "BCL_ms": cfg.BCL_MS, **({"onset_frame": onset} if onset is not None else {}), "K_spring": cfg.K_SPRING,
          "fiber_angles_deg": [list(a) for a in model.fiber_families(cfg)[0]], "fiber_weights": g["weights"].tolist()}
+    if model.myo_endo(cfg):
+        source = {"thickness_um": cfg.ENDO_THICKNESS_UM, "sublayers": cfg.ENDO_SUBLAYERS} if cfg.ENDO_GROW \
+            else {"layer": "input surfaces"}
+        m["endo_layer"] = {**source, "pressure_jump": cfg.ENDO_PRESSURE_JUMP, **cfg.ENDO_MATERIAL}
     return m
 
 

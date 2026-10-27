@@ -19,15 +19,20 @@ COMPS = ("CC", "LL", "RR", "CL", "CR", "LR")  # stress components in the cardiac
 MMHG_PER_KPA = 7.50062
 
 
+def myo_endo(cfg):
+    """True for the wall of myocardium + endocardium (WALL = "myo_endo"; absent or "myo": myocardium only)."""
+    return getattr(cfg, "WALL", "myo") == "myo_endo"
+
+
 # ==================== wall mesh ====================
-def read_wall(cfg):
+def read_wall(cfg, name="t0.vtu"):
     """t0.vtu in mm with its local frame (eC, eL, eR per cell) and boundary: outward boundary faces `bnd`, the base
     (faces `on_base`, nodes, outward normal `n_out`), endocardium and epicardium (the two other connected surfaces; the
-    smaller one is the endocardium)."""
+    smaller one is the endocardium). name: another mesh file of the mesh folder (WALL = "myo_endo": t0_endo.vtu)."""
     import meshio
     from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import connected_components
-    vtu = meshio.read(cfg.mesh / "t0.vtu")
+    vtu = meshio.read(cfg.mesh / name)
     points = vtu.points.astype(np.float64) * cfg.MM_PER_UNIT
     cells = vtu.cells_dict["tetra"].astype(np.int64)
     lrc = {k: vtu.cell_data_dict[k]["tetra"].astype(np.float64) for k in ("eC", "eL", "eR")}
@@ -193,6 +198,7 @@ class States:
         self.cfg, self.g, self.vol, self.out, self.name = cfg, g, cell_volume, out, name
         pts = g["points"]
         self.far = (pts[g["cells"]].mean(1) - g["base_origin"]) @ g["base_normal"] / cfg.MM_PER_UNIT >= cfg.BASE_EXCLUDE_UM
+        self.region = g.get("region")  # WALL = "myo_endo": 1 myocardium, 2 endocardial layer
         self.states = {}
         (out / "vtu").mkdir(parents=True, exist_ok=True)
 
@@ -204,8 +210,15 @@ class States:
         loc = cardiac_components(f["F"], f["sigma"], g["eC"], g["eR"])
         extra = {key: f[key] for key in ("sigma_ff2", "Ct_f1", "Ct_f2") if key in f}  # two fiber families only
         data = {"u": u, "sigma": f["sigma"], "sigma_ff": f["sigma_ff"], "p": f["p"], "Ct": f["Ct"], **loc, **extra}
-        for key in ("sigma_ff", "sigma_CC", "sigma_LL", "sigma_RR") + (("sigma_ff2",) if extra else ()):
-            row[f"{key}_wall_mean_kPa"] = float((vol * data[key])[far].sum() / vol[far].sum())
+        if self.region is None:
+            for key in ("sigma_ff", "sigma_CC", "sigma_LL", "sigma_RR") + (("sigma_ff2",) if extra else ()):
+                row[f"{key}_wall_mean_kPa"] = float((vol * data[key])[far].sum() / vol[far].sum())
+        else:  # wall means of the myocardium, and the means of the layer
+            myo, lay = far & (self.region == 1), far & (self.region == 2)
+            for key in ("sigma_ff", "sigma_CC", "sigma_LL", "sigma_RR") + (("sigma_ff2",) if extra else ()):
+                row[f"{key}_wall_mean_kPa"] = float((vol * data[key])[myo].sum() / vol[myo].sum())
+            for key in ("sigma_ff", "sigma_CC", "sigma_LL", "sigma_RR"):
+                row[f"{key}_endo_mean_kPa"] = float((vol * data[key])[lay].sum() / vol[lay].sum())
         self.states[k] = (row, {key: val.astype(np.float32) for key, val in data.items()})
         f32 = np.float32
         meshio.Mesh(g["points"] / cfg.MM_PER_UNIT, [("tetra", g["cells"])], point_data={"u_um": (u / cfg.MM_PER_UNIT).astype(f32)},
@@ -213,7 +226,9 @@ class States:
                                **{key: [val.astype(f32)] for key, val in extra.items()},
                                **{f"sigma_{cc}": [loc[f"sigma_{cc}"].astype(f32)] for cc in COMPS},
                                "sigma": [f["sigma"].reshape(-1, 9).astype(f32)], "p": [f["p"].astype(f32)],
-                               "far_from_base": [far.astype(np.int32)]}).write(self.out / "vtu" / f"{self.name}{k:02d}.vtu")
+                               "far_from_base": [far.astype(np.int32)],
+                               **({} if self.region is None else {"region": [self.region.astype(np.int32)]})}
+                    ).write(self.out / "vtu" / f"{self.name}{k:02d}.vtu")
 
     def write(self, columns, material):
         """vtu/cycle.pvd, summary.csv, pv_results.npz (the summary columns `columns`, the fields of every state, mesh,
@@ -233,6 +248,8 @@ class States:
         col = {key: np.array([r_[key] for r_ in rows]) for key in rows[0]}
         fields = {key: np.stack([self.states[k][1][key] for k in ks]) for key in self.states[ks[0]][1]}
         two = {"f0_2": g["fibers"][1]} if len(g["fibers"]) == 2 else {}
+        if self.region is not None:
+            two["region"] = self.region
         np.savez_compressed(out / "pv_results.npz", **{k: col[k] for k in columns},
                             **fields, points=g["points"], cells=g["cells"], f0=g["f0"], **two, eC=g["eC"], eL=g["eL"], eR=g["eR"],
                             far_from_base=self.far, cell_volume=self.vol, material=np.array(json.dumps(material)))

@@ -14,6 +14,10 @@ Three tasks, each with an FE and a PINN solver and with one or two fiber familie
 | `windkessel` | the chamber in a closed-loop circulation (heartFEM's coupling: a P-V-t table of the chamber in an ngspice circuit) | the reference frame | coupled cycle (pressures, volumes, flows, valve timing), and its displacement and stresses |
 | `invert_para` | the passive stiffness C and the peak active tension T_MAX from two tracked frames (end-diastole, peak systole) with given cavity pressures | three frames (reference, ED, PS) | C, T_MAX, misfit, surface distances and Dice coefficients against the tracking |
 
+The wall is the myocardium. The windkessel FE mode can also solve a wall of myocardium + endocardium (`WALL =
+"myo_endo"`): a thin endocardial layer, grown from the myocardial inner surface into the cavity or given with the input
+surface, solved together with the myocardium (example `windkessel/FE_two_fibers_endo`).
+
 The FE solves a nonlinear problem per state (MPI on the CPU). The PINN is trained once per geometry, without FE or
 image data, by minimizing the potential energy of the same mechanics; it then returns the equilibrium displacement of
 any load in milliseconds (GPU).
@@ -31,6 +35,7 @@ HeartFEM_Mu/
 │   ├── preprocess.py      raw surfaces -> tetrahedral wall mesh, local frame (eC, eL, eR), cut surfaces of every frame
 │   ├── landmarks.py       browser app that places the base plane and the apex (only if USE_SAVED_LANDMARKS = False)
 │   ├── model.py           shared by FE and PINN: wall boundary, fiber families, frame volumes, activation time, result files
+│   ├── myo_endo.py        wall of myocardium + endocardium (WALL = "myo_endo", windkessel FE): the layer grown on the mesh or meshed from the input, two-region FE input
 │   ├── fe.py              FE solver (dolfin): volume-driven problem (volume_constrain, windkessel), pressure-driven problem (invert_para)
 │   ├── pinn.py            PINN solver (torch): material laws, P2 discretization, the networks, energies, training
 │   ├── volume_constrain.py   task: P-V cycle (FE, PINN)
@@ -40,11 +45,11 @@ HeartFEM_Mu/
 │   └── data/              circuit template atrium_wk.cir, heartFEM generateLVtable.py (original source), three.js
 └── examples/
     ├── volume_constrain/{FE_one_fiber, FE_two_fibers, PINN_one_fiber, PINN_two_fibers}/
-    ├── windkessel/{FE_one_fiber, FE_two_fibers, PINN_one_fiber, PINN_two_fibers}/
+    ├── windkessel/{FE_one_fiber, FE_two_fibers, PINN_one_fiber, PINN_two_fibers, FE_two_fibers_endo}/
     └── invert_para/{FE_one_fiber, FE_two_fibers, PINN_one_fiber, PINN_two_fibers}/
         each:  main.py  params.py  input/  output/ (invert_para also cache/)  README.md
 ```
-The library has two layers: data (`preprocess`, `model`) and solvers (`fe`, `pinn`) below the three task modules,
+The library has two layers: data (`preprocess`, `model`, `myo_endo`) and solvers (`fe`, `pinn`) below the three task modules,
 `plots` on top. `fe.py` is imported only in the FEniCS environment and `pinn.py` only in the torch environment; the other
 modules need numpy and scipy (and matplotlib, vtk for the figures).
 
@@ -100,6 +105,9 @@ python main.py --from solve     # this step and the following ones
 | invert_para FE | preprocess, invert (FE, MPI), evaluate |
 | invert_para PINN | preprocess, train (GPU), invert (GPU), evaluate |
 
+With `WALL = "myo_endo"` (windkessel FE) the step `endo_layer` (the endocardial layer grown on the mesh) follows
+`preprocess` (`ENDO_GROW = True`), or `preprocess` meshes both layers of the input surface (`ENDO_GROW = False`).
+
 ## Settings
 Each example's `params.py` holds every setting of its mode; `main.py` refuses a `params.py` with a missing or unknown
 setting for its `TASK` and `SOLVER` (start a new case from the example of the same mode). The first section selects
@@ -116,6 +124,7 @@ the mode and the compute resources:
 | `GPU` | PINN: the GPU (index of `nvidia-smi`); `None`: the CPU |
 | `CONDA_ENV`, `CONDA_ENV_FENICS` | the two conda environments |
 | `MESH_THREADS` | (preprocess section) threads of the gmsh mesher; the mesh depends on it (see Reproducibility) |
+| `WALL` | (optional, wall section) `"myo"`: the myocardium (also when `WALL` is absent, as in every example but one); `"myo_endo"`: myocardium + endocardial layer, windkessel FE only (every other mode refuses it), with the settings `ENDO_GROW` (`True`: the layer grown from the myocardial mesh, `ENDO_THICKNESS_UM`, `ENDO_SUBLAYERS`; `False`: the input surface has both layers), `ENDO_PRESSURE_JUMP`, `ENDO_MATERIAL` (see `examples/windkessel/FE_two_fibers_endo`) |
 
 All other settings (geometry, fibers, material, activation, circulation, misfit, network, training) and their sources
 are described in the example's `README.md`.
@@ -133,8 +142,17 @@ curl -LO https://github.com/SiyuMU/HeartFEM_Mu/releases/download/v1.0.0/heartfem
 ```bash
 tar -xzf heartfem_mu_v1.0.0_outputs_volume_constrain.tar.gz
 ```
-(the same for `windkessel` and `invert_para`; `SHA256SUMS` lists the checksums). Without them, `python main.py`
-recomputes every file from `input/`.
+(the same for `windkessel` and `invert_para`; `SHA256SUMS` lists the checksums). The example
+`windkessel/FE_two_fibers_endo`, added in v1.1.0, has its large files in one archive of the release
+[v1.1.0](https://github.com/SiyuMU/HeartFEM_Mu/releases/tag/v1.1.0):
+```bash
+curl -LO https://github.com/SiyuMU/HeartFEM_Mu/releases/download/v1.1.0/heartfem_mu_v1.1.0_outputs_windkessel_FE_two_fibers_endo.tar.gz
+```
+```bash
+tar -xzf heartfem_mu_v1.1.0_outputs_windkessel_FE_two_fibers_endo.tar.gz
+```
+(checksum in `SHA256SUMS_v1.1.0` of that release). Without the archives, `python main.py` recomputes every file from
+`input/`.
 
 <!-- EXAMPLES TABLE -->
 | example | fibers | main result |
@@ -152,6 +170,12 @@ recomputes every file from `input/`.
 | `invert_para/PINN_two_fibers` | two fiber families | C 0.07757 kPa, T_MAX 4.355 kPa, J 25.82 |
 | `invert_para/PINN_one_fiber` | one fiber family | C 0.07108 kPa, T_MAX 4.018 kPa, J 33.58 |
 <!-- /EXAMPLES TABLE -->
+
+Wall of myocardium + endocardium (`WALL = "myo_endo"`):
+
+| example | wall | main result |
+|---|---|---|
+| `windkessel/FE_two_fibers_endo` | two fiber families, 2 um endocardial layer | atrial P max / min 3.66 / -0.24 mmHg; ventricle EDV / ESV 0.554 / 0.227 nL; mean arterial P 4.80 mmHg |
 
 ## Reproducibility
 - **Preprocessing** is deterministic. gmsh meshes the surface patches in parallel, so the tetrahedra depend on the

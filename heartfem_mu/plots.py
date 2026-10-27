@@ -390,6 +390,8 @@ def field_summary(cfg):
       wall volume (cells >= BASE_EXCLUDE_UM from the base)."""
     REPLAY = cfg.output / "replay"
     r = np.load(REPLAY / "pv_results.npz")
+    if "region" in r.files:  # WALL = "myo_endo"
+        return field_summary_myo_endo(cfg, r)
     X, C, f0, vol, far = r["points"], r["cells"], r["f0"], r["cell_volume"], r["far_from_base"].astype(bool)
     w = vol[far] / vol[far].sum()
     wall_nL = vol.sum() * 1e3  # mm^3 -> nL
@@ -427,6 +429,63 @@ def field_summary(cfg):
         f"at peak P ({a['P_kPa'][i]:.3f} kPa, t {a['t_ms'][i]:.0f} ms): wall-mean sigma_CC {a['sCC_wall'][i]:.2f}, sigma_ff "
         f"{a['sff_wall'][i]:.2f}, sigma_LL {a['sLL_wall'][i]:.2f}, sigma_RR {a['sRR_wall'][i]:.2f} kPa; in-plane mean "
         f"{(a['sCC_wall'][i] + a['sLL_wall'][i]) / 2:.2f} vs Laplace P r / 2h {a['laplace_kPa'][i]:.2f} kPa",
+    ]
+    (REPLAY / "fields_summary.txt").write_text("\n".join(lines) + "\n")
+    print("\n".join(lines))
+
+
+def field_summary_myo_endo(cfg, r):
+    """field_summary for the wall of myocardium + endocardium (WALL = "myo_endo"): sarcomere length and wall means of
+    the myocardium, the means of the layer on a line of their own, J of all cells, and the Laplace estimate with the
+    whole wall (layer + myocardium) against its in-plane mean."""
+    REPLAY = cfg.output / "replay"
+    X, C, f0, vol, far_all = r["points"], r["cells"], r["f0"], r["cell_volume"], r["far_from_base"].astype(bool)
+    myo = r["region"] == 1
+    far, lay = far_all & myo, far_all & ~myo
+    w, wl, wa = vol[far] / vol[far].sum(), vol[lay] / vol[lay].sum(), vol[far_all] / vol[far_all].sum()
+    wall_nL = vol.sum() * 1e3  # mm^3 -> nL
+    rows = []
+    for k in np.argsort(r["t_ms"]):
+        F = cell_F(X, C, r["u"][k])
+        ls = cfg.LR * np.linalg.norm(np.einsum("cij,cj->ci", F[myo], f0[myo]), axis=1)
+        J = np.linalg.det(F)
+        V, P = float(r["V_nL"][k]), float(r["P_kPa"][k])
+        r_mm = (3 * V * 1e-3 / (4 * np.pi)) ** (1 / 3)
+        h_mm = ((3 * (V + wall_nL) * 1e-3 / (4 * np.pi)) ** (1 / 3)) - r_mm
+        rows.append({"state": int(r["state"][k]), "t_ms": float(r["t_ms"][k]), "V_nL": V, "P_kPa": P,
+                     "u_max_um": 1e3 * float(np.linalg.norm(r["u"][k], axis=1).max()),
+                     "ls_p5": float(np.percentile(ls, 5)), "ls_mean": float((w * ls[far[myo]]).sum()), "ls_p95": float(np.percentile(ls, 95)),
+                     "J_min": float(J.min()), "J_max": float(J.max()), "J_mean": float((vol * J).sum() / vol.sum()),
+                     "J_far_off_fraction": float(vol[far_all][np.abs(J[far_all] - 1) > 0.2].sum() / vol[far_all].sum()),
+                     "sff_wall": float((w * r["sigma_ff"][k][far]).sum()), "sCC_wall": float((w * r["sigma_CC"][k][far]).sum()),
+                     "sLL_wall": float((w * r["sigma_LL"][k][far]).sum()), "sRR_wall": float((w * r["sigma_RR"][k][far]).sum()),
+                     "sCC_endo": float((wl * r["sigma_CC"][k][lay]).sum()), "sLL_endo": float((wl * r["sigma_LL"][k][lay]).sum()),
+                     "sRR_endo": float((wl * r["sigma_RR"][k][lay]).sum()),
+                     "inplane_whole_wall": float((wa * 0.5 * (r["sigma_CC"][k] + r["sigma_LL"][k])[far_all]).sum()),
+                     "laplace_kPa": P * r_mm / (2 * h_mm), "r_um": 1e3 * r_mm, "h_um": 1e3 * h_mm,
+                     "T_mean_kPa": float(r["T_mean_kPa"][k])})
+    with open(REPLAY / "fields_summary.csv", "w", newline="") as fh:
+        wr = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        wr.writeheader()
+        wr.writerows({k: (f"{v:.5g}" if isinstance(v, float) else v) for k, v in q.items()} for q in rows)
+    a = {k: np.array([q[k] for q in rows]) for k in rows[0]}
+    Vmax, Vmin = a["V_nL"].max(), a["V_nL"].min()
+    i = int(np.argmax(a["P_kPa"]))
+    lines = [
+        f"cavity (lumen) V {Vmin:.3f}-{Vmax:.3f} nL, cube-root shortening {100 * (1 - (Vmin / Vmax) ** (1 / 3)):.1f} %; "
+        f"myocardial wall-mean ls {a['ls_mean'].min():.3f}-{a['ls_mean'].max():.3f} um (shortening "
+        f"{100 * (1 - a['ls_mean'].min() / a['ls_mean'].max()):.1f} %); myocardial cell ls 5-95 % over the cycle "
+        f"{a['ls_p5'].min():.3f}-{a['ls_p95'].max():.3f} um",
+        f"u_max {a['u_max_um'].max():.1f} um (cavity radius {a['r_um'].min():.0f}-{a['r_um'].max():.0f} um, wall incl. layer "
+        f"~{a['h_um'].mean():.0f} um)",
+        f"J (all cells): volume mean {a['J_mean'].min():.4f}-{a['J_mean'].max():.4f}, cells {a['J_min'].min():.3f}-"
+        f"{a['J_max'].max():.3f}; away from the base |J - 1| > 0.2 in at most {100 * a['J_far_off_fraction'].max():.2f} % of the wall",
+        f"at peak P ({a['P_kPa'][i]:.3f} kPa, t {a['t_ms'][i]:.0f} ms): myocardial wall-mean sigma_CC {a['sCC_wall'][i]:.2f}, "
+        f"sigma_ff {a['sff_wall'][i]:.2f}, sigma_LL {a['sLL_wall'][i]:.2f}, sigma_RR {a['sRR_wall'][i]:.2f} kPa; in-plane mean "
+        f"of the whole wall {a['inplane_whole_wall'][i]:.2f} vs Laplace P r / 2h {a['laplace_kPa'][i]:.2f} kPa",
+        f"endocardial layer at peak P: mean sigma_CC {a['sCC_endo'][i]:.2f}, sigma_LL {a['sLL_endo'][i]:.2f}, sigma_RR "
+        f"{a['sRR_endo'][i]:.2f} kPa; most compressed over the cycle: sigma_CC {a['sCC_endo'].min():.2f} kPa "
+        f"(t {a['t_ms'][int(np.argmin(a['sCC_endo']))]:.0f} ms)",
     ]
     (REPLAY / "fields_summary.txt").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
