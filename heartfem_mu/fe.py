@@ -26,9 +26,10 @@ Two problems:
     VolumeProblem    (volume_constrain, windkessel) the cavity volume is prescribed: P is the Lagrange multiplier of
                      V(u) = V_target, V(u) = -1/3 int_endo (X + u) . cof(F) N dS. A state is the pair (V, activation
                      time t); the model is quasi-static and has no history variable.
-    PressureProblem  (invert_para) the cavity pressure is given and the volume is an output; C and T_MAX are assignable
-                     constants (parameter sets are solved without recompiling); the activation level Ct of a frame is a
-                     constant (0 at ED, the rise value at PS); a state is reached by continuation in s = (P, Ct, C, T_MAX).
+    PressureProblem  (invert_para, unloading) the cavity pressure is given and the volume is an output; C and T_MAX
+                     are assignable constants (parameter sets are solved without recompiling); the activation level Ct
+                     of a frame is a constant (0 at ED, the rise value at PS); a state is reached by continuation in
+                     s = (P, Ct, C, T_MAX). unloading moves its reference (mesh vertices, fiber fields: unloading_fe.py).
 """
 import operator
 import time
@@ -514,6 +515,7 @@ class PressureProblem(Newton):
             self.fibers.append(ff)
             normals.append(nn)
         self.f0 = self.fibers[0]
+        self.normals = normals  # the DG0 fields n_i = f_i x eR (refilled when the reference moves: unloading)
         weights = [w_ for _, w_ in self.families]
 
         def mix(terms):

@@ -9,9 +9,11 @@ one triangle connectivity) and INPUT_DIR/base_plane.json (base plane, apex, refe
     surface_cut/            (volume_constrain, invert_para) every input frame cut at the base plane with the reference
                             cut topology: t<k>.stl and correspondence.npz (endo / epi labels, provenance)
     preprocess_info.json    mesh statistics
-windkessel reads one surface file (the reference frame) and writes no surface_cut. mesh/ is OUTPUT_DIR/mesh
-(invert_para: CACHE_DIR/mesh). With USE_SAVED_LANDMARKS (default) the base plane, apex and reference frame come from
-INPUT_DIR/base_plane.json and no browser is needed; otherwise the browser app of landmarks.py places them.
+windkessel and unloading read one surface file (the reference frame; unloading: the end-diastolic wall) and write no
+surface_cut; unloading also takes a wall already cut at the base plane (one closed surface: endocardium, epicardium and
+the flat base in the plane), meshed as it is. mesh/ is OUTPUT_DIR/mesh (invert_para, unloading: CACHE_DIR/mesh).
+With USE_SAVED_LANDMARKS (default) the base plane, apex and reference frame come from INPUT_DIR/base_plane.json and no
+browser is needed; otherwise the browser app of landmarks.py places them (two-shell surfaces only).
 The tetrahedra depend on the number of threads of gmsh (params.MESH_THREADS, set by run.py): it meshes the surface
 patches in parallel.
 """
@@ -48,7 +50,8 @@ GMSH = "gmsh"  # Executable on PATH, or the full path to your Gmsh executable.
 
 # ==================== 1. the reference surface ====================
 def reference_surface(data_dir):
-    """windkessel: the one STL file of the input folder and its frame number (t<k>.stl -> k, any other name -> 0)."""
+    """windkessel, unloading: the one STL file of the input folder and its frame number (t<k>.stl -> k, any other name
+    -> 0)."""
     files = sorted(Path(data_dir).glob("*.stl"))
     if len(files) != 1:
         raise ValueError(f"Expected one STL file (the reference frame) in {data_dir}, found {len(files)}.")
@@ -279,6 +282,19 @@ def cut_wall(shells, origin, normal, keep_sign):
     if not wall.is_watertight or len(wall.split()) != 1:
         raise ValueError("The cut wall is not a single watertight solid; adjust the plane.")
     return wall, surfaces
+
+
+def precut_surfaces(wall, origin, normal, scale):
+    """A wall already cut at the base plane (one closed surface): its inner and outer side surfaces (as cut_wall
+    returns them; the inner one has the smaller area), i.e. every face that is not in the plane."""
+    on_base = np.abs((wall.vertices[wall.faces] - origin) @ normal).max(axis=1) < scale * 1e-5
+    if not on_base.any():
+        raise ValueError("One closed surface is read as a wall already cut at the base plane: its base must lie in "
+                         "the plane.")
+    parts = trimesh.Trimesh(wall.vertices, wall.faces[~on_base], process=False).split(only_watertight=False)
+    if len(parts) != 2:
+        raise ValueError(f"The cut wall must have an inner and an outer surface besides its base, found {len(parts)}.")
+    return [polydata(part) for part in sorted(parts, key=lambda part: part.area)]
 
 
 # ==================== 3. generate tetrahedra with Gmsh ====================
@@ -651,20 +667,24 @@ def export_reference(reference_stl, frame, origin, normal, apex, output_dir,
         raise ValueError("Mesh size and apex radius must be positive and finite.")
     mesh = trimesh.load_mesh(reference_stl, process=True)
     shells = sorted(mesh.split(only_watertight=False), key=lambda shell: abs(shell.volume))
-    if len(shells) != 2 or not all(shell.is_watertight for shell in shells):
-        raise ValueError("Two closed inner/outer surfaces are required.")
+    precut = len(shells) == 1 and shells[0].is_watertight  # a wall already cut at the base plane (unloading)
+    if not precut and (len(shells) != 2 or not all(shell.is_watertight for shell in shells)):
+        raise ValueError("Two closed inner/outer surfaces (or one closed wall cut at the base plane) are required.")
     apex = np.asarray(apex, dtype=float)
     scale = np.linalg.norm(mesh.extents)
     if apex.shape != (3,) or not np.all(np.isfinite(apex)):
         raise ValueError("Select a finite apex point on the outer surface.")
-    _, distance, _ = trimesh.proximity.closest_point_naive(shells[1], apex[None])
+    _, distance, _ = trimesh.proximity.closest_point_naive(shells[-1], apex[None])
     if distance[0] > scale * 1e-5:
         raise ValueError("Select the apex on the outer surface.")
     signed_apex = float(np.dot(apex - origin, normal))
     if abs(signed_apex) < apex_radius:
         raise ValueError("Move the base plane farther from the apex patch.")
     keep_sign = 1 if signed_apex > 0 else -1
-    wall, surfaces = cut_wall(shells, origin, normal, keep_sign)
+    if precut:
+        wall, surfaces = shells[0], precut_surfaces(shells[0], origin, normal, scale)
+    else:
+        wall, surfaces = cut_wall(shells, origin, normal, keep_sign)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output_dir, prefix=".mesh-") as temporary:
@@ -717,7 +737,7 @@ def export_reference(reference_stl, frame, origin, normal, apex, output_dir,
 def main(cfg):
     start = time.time()
     data_dir, out, plane_file = cfg.input, cfg.mesh, cfg.input / "base_plane.json"
-    series = cfg.TASK != "windkessel"  # every tracked frame -> surface_cut (volume_constrain, invert_para)
+    series = cfg.TASK not in ("windkessel", "unloading")  # every frame -> surface_cut (volume_constrain, invert_para)
     if series and SURFACE_ONLY:
         if not plane_file.is_file():
             raise FileNotFoundError("No saved base plane. Set SURFACE_ONLY = False to select it in the app first.")

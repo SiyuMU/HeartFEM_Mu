@@ -25,7 +25,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]  # HeartFEM_Mu/
-TASKS = ("volume_constrain", "windkessel", "invert_para")
+TASKS = ("volume_constrain", "windkessel", "invert_para", "unloading")
 SOLVERS = ("FE", "PINN")
 
 
@@ -91,6 +91,11 @@ PIPELINES = {
         Step("invert", "invert_para.pinn_inversion", "search C, T_MAX with the network", gpu=True),
         Step("evaluate", "invert_para.evaluate", "comparison with the tracking"),
     ),
+    ("unloading", "FE"): (
+        PREPROCESS,
+        Step("unload", "unloading.fe_unload", "C and the unloaded geometry (inverse elastostatics), check", fenics=True,
+             mpi="ranks"),
+    ),
 }
 
 
@@ -116,6 +121,9 @@ _INVERSE = _names("INPUT_DIR CACHE_DIR OUTPUT_DIR MESH_SIZE MESH_THREADS USE_SAV
                   "XATOL FATOL MAXFEV STEP") + _FIBERS + _LAWS
 _PARAM_NETWORK = _TRAINING + _names("K_SPRING_OVER_C KAPPA_OVER_C RIGID_OVER_C P_MAX_N A_MAX_N KAPPA_START_OVER_C "
                                     "GRID_P0_N GRID_A0_N")
+_UNLOADING = _names("INPUT_DIR CACHE_DIR OUTPUT_DIR MESH_SIZE MESH_THREADS USE_SAVED_LANDMARKS MM_PER_UNIT P_ED_KPA "
+                    "V0_NL K_SPRING C_FF C_SS C_NN C_NS C_FS C_FN CA0 CA0MAX B L0 LR C_START_KPA SECANT_SLOPE0 "
+                    "MAX_STEP_LN_C TOL_X_UM TOL_LN_C V0_TOL_REL MAX_ITERATIONS CHECK_LOAD_STEPS") + _FIBERS
 _RUN_FE = _names("TASK SOLVER CPUS MPI_RANKS CONDA_ENV CONDA_ENV_FENICS")
 _RUN_PINN = _names("TASK SOLVER CPUS GPU CONDA_ENV")
 PARAMETERS = {  # every setting of an example's params.py, per mode (+ FIBER_SETTINGS of its fiber case)
@@ -125,6 +133,7 @@ PARAMETERS = {  # every setting of an example's params.py, per mode (+ FIBER_SET
     ("windkessel", "PINN"): _RUN_PINN + _names("CONDA_ENV_FENICS P_MIN GRID_NEGATIVE") + _FORWARD + _WINDKESSEL + _LOAD_NETWORK,
     ("invert_para", "FE"): _RUN_FE + _INVERSE + _names("K_SPRING"),
     ("invert_para", "PINN"): _RUN_PINN + _INVERSE + _PARAM_NETWORK,
+    ("unloading", "FE"): _RUN_FE + _UNLOADING,
 }
 FIBER_SETTINGS = {  # the fiber settings that TWO_FIBERS selects; params.py needs only those of its case
     False: _names("FIBER_ANGLE_DEG"),
@@ -144,7 +153,7 @@ ENDO_MATERIAL_KEYS = _names("C C_FF C_SS C_NN C_NS C_FS C_FN T_MAX")
 
 def load(example):
     """Settings of an example (its params.py) as attributes, with the folders: root, params_file, input, output, cache
-    (invert_para), mesh (the preprocess products: OUTPUT_DIR/mesh, invert_para CACHE_DIR/mesh)."""
+    (invert_para, unloading), mesh (the preprocess products: OUTPUT_DIR/mesh, invert_para and unloading CACHE_DIR/mesh)."""
     root = Path(example).resolve()
     params_file = root / "params.py"
     if not params_file.is_file():
@@ -155,6 +164,9 @@ def load(example):
     task, solver = values.get("TASK"), values.get("SOLVER")
     if task not in TASKS or solver not in SOLVERS:
         raise ValueError(f"{params_file}: TASK must be one of {TASKS} and SOLVER one of {SOLVERS}, got {task!r}, {solver!r}")
+    if (task, solver) not in PIPELINES:
+        raise ValueError(f"{params_file}: TASK = {task!r} has no SOLVER = {solver!r} (available: "
+                         f"{', '.join(s for t, s in PIPELINES if t == task)})")
     two = values.get("TWO_FIBERS", False)
     if not isinstance(two, bool):
         raise ValueError(f"{params_file}: TWO_FIBERS must be True or False, got {two!r}")
@@ -190,9 +202,9 @@ def load(example):
     cfg = SimpleNamespace(**values)
     cfg.root, cfg.params_file = root, params_file
     cfg.input, cfg.output = root / cfg.INPUT_DIR, root / cfg.OUTPUT_DIR
-    if task == "invert_para":
+    if task in ("invert_para", "unloading"):  # the mesh in CACHE_DIR: OUTPUT_DIR holds only the results
         cfg.cache = root / cfg.CACHE_DIR
-    cfg.mesh = (cfg.cache if task == "invert_para" else cfg.output) / "mesh"
+    cfg.mesh = (cfg.cache if task in ("invert_para", "unloading") else cfg.output) / "mesh"
     return cfg
 
 
@@ -203,6 +215,9 @@ def check_input(cfg):
         need += [cfg.input / f"t{k}.stl" for k in range(cfg.N_FRAMES)]
     elif cfg.TASK == "invert_para":
         need += [cfg.input / f"t{k}.stl" for k in (cfg.REF_FRAME, cfg.ED_FRAME, cfg.PS_FRAME)]
+    elif cfg.TASK == "unloading":
+        if len(list(cfg.input.glob("*.stl"))) != 1:
+            raise ValueError(f"unloading needs exactly one STL file (the end-diastolic wall) in {cfg.input}")
     elif len(list(cfg.input.glob("*.stl"))) != 1:
         raise ValueError(f"windkessel needs exactly one STL file (the reference frame) in {cfg.input}")
     missing = [str(p.relative_to(cfg.root)) for p in need if not p.is_file()]
