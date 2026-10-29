@@ -6,6 +6,7 @@ __pycache__/
 examples/*/*/output/mesh/
 examples/*/*/cache/
 examples/**/*.vtu
+!examples/unloading/*/output/unloaded.vtu
 examples/**/*.npz
 examples/**/*.pt
 examples/**/*.h5
