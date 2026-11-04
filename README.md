@@ -165,7 +165,15 @@ curl -LO https://github.com/SiyuMU/HeartFEM_Mu/releases/download/v1.1.0/heartfem
 ```bash
 tar -xzf heartfem_mu_v1.1.0_outputs_windkessel_FE_two_fibers_endo.tar.gz
 ```
-(checksum in `SHA256SUMS_v1.1.0` of that release). The examples `unloading/*` are complete in the
+(checksum in `SHA256SUMS_v1.1.0` of that release). The example `volume_constrain/FE_one_fiber_disp`, added in v1.2.0,
+has its large files in one archive of the release [v1.2.0](https://github.com/SiyuMU/HeartFEM_Mu/releases/tag/v1.2.0):
+```bash
+curl -LO https://github.com/SiyuMU/HeartFEM_Mu/releases/download/v1.2.0/heartfem_mu_v1.2.0_outputs_volume_constrain_FE_one_fiber_disp.tar.gz
+```
+```bash
+tar -xzf heartfem_mu_v1.2.0_outputs_volume_constrain_FE_one_fiber_disp.tar.gz
+```
+(checksum in `SHA256SUMS_v1.2.0` of that release). The examples `unloading/*` are complete in the
 repository. Without the archives, `python main.py` recomputes every file from `input/`.
 
 <!-- EXAMPLES TABLE -->
