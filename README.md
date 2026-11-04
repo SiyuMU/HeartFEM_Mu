@@ -213,6 +213,15 @@ cavity volume V0 0.6771818 nL:
 | `unloading/FE_two_fibers` | two fiber families | C 0.07891 kPa; loading the unloaded wall to P_ED reproduces the ED wall (9e-7 um); d ln C / d ln V0 6.78 |
 | `unloading/FE_one_fiber` | one fiber family | C 0.07006 kPa; loading the unloaded wall to P_ED reproduces the ED wall (2e-7 um); d ln C / d ln V0 7.03 |
 
+## Versions
+| version | date | adds |
+|---|---|---|
+| [v1.0.0](https://github.com/SiyuMU/HeartFEM_Mu/releases/tag/v1.0.0) | 2026-10-26 | the library and 12 examples: `volume_constrain`, `windkessel`, `invert_para` x FE / PINN x one / two fiber families |
+| [v1.1.0](https://github.com/SiyuMU/HeartFEM_Mu/releases/tag/v1.1.0) | 2026-10-27 | wall of myocardium + endocardium (`WALL = "myo_endo"`, windkessel FE); example `windkessel/FE_two_fibers_endo` |
+| [v1.2.0](https://github.com/SiyuMU/HeartFEM_Mu/releases/tag/v1.2.0) | 2026-11-04 | task `unloading` (FE; examples `unloading/FE_one_fiber`, `FE_two_fibers`); displacement constraint of the volume_constrain FE (`DISP_CONSTRAIN`); example `volume_constrain/FE_one_fiber_disp` |
+
+Each version keeps the examples and results of the previous ones unchanged.
+
 ## Reproducibility
 - **Preprocessing** is deterministic. gmsh meshes the surface patches in parallel, so the tetrahedra depend on the
   number of threads gmsh uses: `MESH_THREADS` (36 in `volume_constrain/*` and in the PINN examples, 1 in
