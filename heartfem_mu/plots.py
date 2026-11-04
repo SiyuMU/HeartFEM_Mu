@@ -13,6 +13,8 @@
                 pv_cycle.mp4              the coupled cycle state by state: the deforming wall on a long-axis section
                                           coloured by the fiber stress, next to the atrial P-V loop
     invert_comparison invert_para, step evaluate: comparison.png (long-axis sections, tracking vs model)
+    disp_compare_movie  volume_constrain with DISP_CONSTRAIN, step compare: disp_compare.mp4 (the simulated wall on
+                      the long-axis section, coloured by sigma_ff, over the tracked wall, with the wall Dice)
 The colour of the solver: FE blue, PINN orange (volume_constrain).
 """
 import csv
@@ -207,6 +209,68 @@ def pv_movie(cfg):
             label.set_text(f"P-V loop: {j * dt:.0f} ms after max volume\nV = {V[i]:.3f} nL,  P = {P[i]:.3f} kPa,  T = {T[i]:.1f} kPa")
             writer.grab_frame()
     print("wrote", cfg.output / "pv_cycle.mp4", flush=True)
+
+
+def disp_compare_movie(cfg, trk, dice):
+    """OUTPUT_DIR/disp_compare.mp4 (DISP_CONSTRAIN): one cycle from the maximum volume, the simulated wall on the
+    long-axis section of pv_cycle.mp4 coloured by sigma_ff (same colour scale) over the tracked wall of the frame (trk:
+    disp_constrain.Tracking; blurred grey band, solid / dashed epi / endo outline), title: frame, P and wall Dice."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import PolyCollection
+    from scipy.ndimage import gaussian_filter
+    from .disp_constrain import signed_distance
+    writer = ffmpeg_writer(cfg, plt)
+    if writer is None:
+        return
+    r = np.load(cfg.output / "pv_results.npz")
+    X, cells = r["points"] / cfg.MM_PER_UNIT, r["cells"]
+    section, o, e1, n = long_axis_section(cfg, X, cells)
+    sff = r["sigma_ff"]
+    lim = float(np.ceil(np.percentile(np.abs(sff[:, r["far_from_base"]]), 99.5)))
+    k, V, P = r["frame"], r["V_nL"], r["P_kPa"]
+    order = np.roll(np.arange(len(k)), -int(np.argmax(V)))  # one cycle from the maximum volume
+    ext = np.concatenate([((X + 1e3 * r["u"][i]) - o) @ np.c_[e1, n] for i in range(len(k))]
+                         + [(trk.X[kk] - o) @ np.c_[e1, n] for kk in k])
+    ext = ext[ext[:, 1] > -8]  # the tracked surfaces continue above the base plane
+    h = 0.5
+    gu = np.arange(ext[:, 0].min() - 5, ext[:, 0].max() + 5, h)
+    gv = np.arange(-6, ext[:, 1].max() + 5, h)
+    U, W = np.meshgrid(gu, gv)
+    q = o + U.ravel()[:, None] * e1 + W.ravel()[:, None] * n
+    fig, ax = plt.subplots(figsize=(7.2, 6.4))
+    band = ax.imshow(np.zeros_like(U), extent=(gu[0], gu[-1], gv[-1], gv[0]), cmap="Greys", vmin=0, vmax=3,
+                     interpolation="bilinear")
+    pc = PolyCollection([], cmap="RdBu_r", edgecolors="face", linewidths=0.2, alpha=0.9)
+    pc.set_clim(-lim, lim)
+    ax.add_collection(pc)
+    ax.set_xlim(gu[0], gu[-1])
+    ax.set_ylim(gv[-1], gv[0])  # base on top, apex at the bottom
+    ax.set_aspect("equal")
+    ax.set(xlabel="µm", ylabel="distance from the base plane (µm)")
+    ax.spines[["top", "right"]].set_visible(False)
+    fig.colorbar(pc, ax=ax, shrink=0.8, extend="both", label="fiber stress σ$_{ff}$ (kPa)")
+    title = ax.set_title("", loc="left", fontsize=10)
+    fig.tight_layout()
+    outlines = []
+    with writer.saving(fig, str(cfg.output / "disp_compare.mp4"), dpi=130):
+        for i in order:
+            Xk = trk.X[k[i]]
+            s_epi = signed_distance(Xk, trk.epi_f, q).reshape(U.shape)
+            s_endo = signed_distance(Xk, trk.endo_f, q).reshape(U.shape)
+            band.set_data(gaussian_filter(((s_epi < 0) & (s_endo > 0)).astype(float), 1.5))
+            for c in outlines:
+                c.remove()
+            outlines = [ax.contour(gu, gv, s_epi, [0], colors="0.45", linewidths=0.8),
+                        ax.contour(gu, gv, s_endo, [0], colors="0.45", linewidths=0.8, linestyles="--")]
+            polys, vals = section(X + 1e3 * r["u"][i], sff[i])
+            pc.set_verts(polys)
+            pc.set_array(vals)
+            title.set_text(f"t{k[i]:02d}   P = {P[i]:.2f} kPa   wall Dice = {dice[i]:.2f}\n"
+                           f"colour: simulation (w = {cfg.DISP_WEIGHT:g} kPa/mm), grey: tracking")
+            writer.grab_frame()
+    print("wrote", cfg.output / "disp_compare.mp4", flush=True)
 
 
 # ==================== windkessel ====================

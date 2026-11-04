@@ -3,7 +3,9 @@ V_k = V0 x V_img,k / V_img,ref (cut surfaces of mesh/), and the model returns th
 the stresses. Activation time of frame k: t_k = mod(k - onset, N) BCL / N, onset = the frame of maximum volume +
 ONSET_AFTER_ED_FRAMES.
     FE    step solve (MPI): heartFEM's volume-controlled formulation (fe.VolumeProblem); the frames are solved in time
-          order from the reference frame, each starting from the previous solution.
+          order from the reference frame, each starting from the previous solution. Optional (DISP_CONSTRAIN = True):
+          the displacement constraint of disp_constrain.py, the wall pulled toward the tracked wall with the weight
+          DISP_WEIGHT (steps targets before solve, compare after it).
     PINN  steps train, solve: with t_k fixed, the cavity pressure P_k solves V_PINN(P, t_k) = V_k (bisection on [0, P_MAX];
           V is monotonic in P); the displacement is the network output at (P_k, t_k). Stresses: F from the P2 displacement
           at the quadrature points; hydrostatic pressure p recovered as the P1 field that best balances the P2 weak
@@ -36,16 +38,24 @@ def fe_cycle(cfg):
     x = np.empty(N)  # activation time unwrapped along the solve order (reference frame first)
     for i in range(N):
         x[(ref + i) % N] = t_a[ref] + i * dt
+    image = None
+    if getattr(cfg, "DISP_CONSTRAIN", False):  # displacement constraint (disp_constrain.py, step targets)
+        from . import disp_constrain
+        image = (float(cfg.DISP_WEIGHT), disp_constrain.load_targets(cfg))
+        fe.log(f"displacement constraint: weight {cfg.DISP_WEIGHT} kPa/mm")
     states, info = fe.solve_states(
         cfg, g, R, mesh_h5, [(ref + i) % N for i in range(N)], x, lambda pb, k: pb.V0 * ratio[k], cfg.output, "frame",
         describe=lambda k, V: f"  t{k:02d}  V/V0 {ratio[k]:.4f}  t_a {t_a[k]:5.1f} ms",
         row=lambda k, P, V, T, u_max, its, s: {"frame": k, "t_ms": k * cfg.BCL_MS / N, "t_active_ms": t_a[k],
                                               "V_ratio": ratio[k], "V_nL": V * 1e3, "P_kPa": P,
                                               "P_mmHg": P * model.MMHG_PER_KPA, "T_mean_kPa": T, "u_max_um": u_max,
-                                              "newton_its": its, "time_s": round(s, 2)})
+                                              "newton_its": its, "time_s": round(s, 2)},
+        image=image)
     if fe.RANK == 0:
-        col = states.write(("frame", "t_ms", "t_active_ms", "V_ratio", "V_nL", "P_kPa", "T_mean_kPa"),
-                           fe.material_record(cfg, g, onset=model.onset_frame(cfg)))
+        material = fe.material_record(cfg, g, onset=model.onset_frame(cfg))
+        if image is not None:
+            material["disp_constrain"] = {"weight_kPa_per_mm": image[0]}
+        col = states.write(("frame", "t_ms", "t_active_ms", "V_ratio", "V_nL", "P_kPa", "T_mean_kPa"), material)
         info.update({"frames": len(col["frame"]), "mean_frame_s": round(float(col["time_s"].mean()), 1),
                      "max_frame_s": round(float(col["time_s"].max()), 1), "newton_its_total": int(col["newton_its"].sum())})
         mesh_h5.unlink()

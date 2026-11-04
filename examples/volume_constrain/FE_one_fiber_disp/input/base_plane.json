@@ -1,0 +1,24 @@
+{
+  "reference_frame": 12,
+  "reference_stl": "t12.stl",
+  "origin": [
+    121.6518330975306,
+    68.33406783436199,
+    85.49199222550155
+  ],
+  "normal": [
+    0.8231305569106613,
+    -0.3723805113169199,
+    0.4287060077387465
+  ],
+  "offset": 111.33999668687511,
+  "equation": "dot(normal, point) = offset",
+  "coordinate_system": "original_STL",
+  "length_unit": "STL_coordinate_unit",
+  "apex": [
+    154.3745785412769,
+    170.05535772542348,
+    59.25173918966432
+  ],
+  "keep_sign": -1
+}
