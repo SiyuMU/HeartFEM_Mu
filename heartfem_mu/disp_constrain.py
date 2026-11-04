@@ -10,16 +10,13 @@ Steps (CONDA_ENV, numpy + scipy; compare also vtk, matplotlib):
            barycentric coordinates in one triangle; all tracked frames share the triangle order, so the point is followed
            through the cycle. Rigid motion of the tracking is removed per frame (least-squares rotation + translation of
            all tracked vertices onto the reference frame; the model has no rigid motion). u_img(ref) = 0.
-           -> OUTPUT_DIR/disp_constrain/targets.npz
-  compare  every frame, simulated wall (mesh + u) vs tracked wall (rigidly aligned as above), on the cells / points at
-           least BASE_EXCLUDE_UM below the base plane of the reference frame:
-           wall Dice on voxels of DICE_VOXEL_UM (tracked wall: inside the epicardium and outside the endocardium of the
-           closed input surfaces; simulated: inside the closed wall boundary), surface distance (simulated endo / epi
-           nodes to the tracked surface of the same side: median, 95 %), misfit to the targets (area-weighted rms over
-           the endo + epi nodes: full vector and normal component), image force w |u_img - u| (area-weighted rms).
-           -> OUTPUT_DIR/disp_constrain/compare.csv, compare.json, disp_constrain.png
+           -> OUTPUT_DIR/mesh/disp_targets.npz (an input of the step solve, next to the other preprocess products)
+  compare  the movie OUTPUT_DIR/disp_compare.mp4 (plots.disp_compare_movie): every frame, the simulated wall on the
+           long-axis section of pv_cycle.mp4, coloured by sigma_ff, over the tracked wall (rigidly aligned as above,
+           blurred grey band, endo / epi outlines), with the wall Dice of the frame: voxels of DICE_VOXEL_UM at least
+           BASE_EXCLUDE_UM below the base plane, tracked wall = inside the epicardium and outside the endocardium of the
+           closed input surfaces, simulated wall = inside the closed boundary of the deformed mesh.
 """
-import json
 import struct
 
 import numpy as np
@@ -131,9 +128,7 @@ def targets(cfg):
         data[nodes] = True
         lines.append(f"{name}: {len(nodes)} nodes, distance to the tracked t{ref} surface median {np.median(d[r, j]):.2f}, "
                      f"max {d[r, j].max():.2f} um")
-    out = cfg.output / "disp_constrain"
-    out.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out / "targets.npz", u_img=u_img, data_nodes=data, rigid_rotation_deg=rigid[:, 0],
+    np.savez_compressed(cfg.mesh / "disp_targets.npz", u_img=u_img, data_nodes=data, rigid_rotation_deg=rigid[:, 0],
                         rigid_shift_um=rigid[:, 1], reference_frame=ref)
     mag = np.linalg.norm(u_img[:, data], axis=2) / cfg.MM_PER_UNIT
     print("\n".join(lines) + f"\nimage displacement: median over the nodes up to {np.median(mag, 1).max():.2f} um; tracking "
@@ -141,7 +136,7 @@ def targets(cfg):
 
 
 def load_targets(cfg):
-    path = cfg.output / "disp_constrain" / "targets.npz"
+    path = cfg.mesh / "disp_targets.npz"
     if not path.exists():
         raise FileNotFoundError(f"{path} missing: run the step targets first")
     return np.load(path)["u_img"]
@@ -176,96 +171,54 @@ def outward(x, tri):
     return tri if np.einsum("ij,ij->i", v[:, 0], np.cross(v[:, 1], v[:, 2])).sum() > 0 else tri[:, ::-1]
 
 
-class Compare:
+class Tracking:
+    """The tracked surfaces of every frame (closed endocardium and epicardium, rigidly aligned as the targets) and the
+    wall Dice of a simulated frame."""
+
     def __init__(self, cfg):
         self.cfg = cfg
         w = model.read_wall(cfg)
-        self.w, self.pts = w, w["points"] / cfg.MM_PER_UNIT
+        self.bnd, self.pts = w["bnd"], w["points"] / cfg.MM_PER_UNIT
         self.X, tri, side, _ = tracked(cfg)
         ref = model.reference_frame(cfg)
         self.endo_f, self.epi_f = outward(self.X[ref], tri[side == 0]), outward(self.X[ref], tri[side == 1])
         self.n_out = w["n_out"]
         self.level = float(np.median(self.pts[w["base_nodes"]] @ self.n_out))
-        self.nodes = {s: np.unique(w[s]) for s in ("endo", "epi")}
 
-    def below(self, x):
-        return self.level - x @ self.n_out
+    def wall(self, k, q):
+        """Mask of the points q inside the tracked wall of frame k."""
+        Xk = self.X[k]
+        return (signed_distance(Xk, self.epi_f, q) < 0) & (signed_distance(Xk, self.endo_f, q) > 0)
 
-    def frame(self, k, u_mm):
-        cfg, x, Xk = self.cfg, self.pts + u_mm / self.cfg.MM_PER_UNIT, self.X[k]
+    def dice(self, k, u_mm):
+        x, Xk = self.pts + u_mm / self.cfg.MM_PER_UNIT, self.X[k]
         lo, hi = np.minimum(x.min(0), Xk.min(0)) - 2, np.maximum(x.max(0), Xk.max(0)) + 2
         q = np.stack(np.meshgrid(*[np.arange(lo[i], hi[i], DICE_VOXEL_UM) for i in range(3)], indexing="ij"), -1).reshape(-1, 3)
-        q = q[self.below(q) >= cfg.BASE_EXCLUDE_UM]
+        q = q[self.level - q @ self.n_out >= self.cfg.BASE_EXCLUDE_UM]
         q = q[(cKDTree(x).query(q, distance_upper_bound=NEAR_UM)[0] < np.inf) |
               (cKDTree(Xk).query(q, distance_upper_bound=NEAR_UM)[0] < np.inf)]
-        sim = signed_distance(x, self.w["bnd"], q) < 0
-        trk = (signed_distance(Xk, self.epi_f, q) < 0) & (signed_distance(Xk, self.endo_f, q) > 0)
-        d = []
-        for s, f in (("endo", self.endo_f), ("epi", self.epi_f)):
-            n = self.nodes[s][self.below(self.pts[self.nodes[s]]) >= cfg.BASE_EXCLUDE_UM]
-            d.append(model.surface_distance(Xk, f, x[n]))
-        d = np.concatenate(d)
-        return {"frame": int(k), "wall_dice": float(2 * (sim & trk).sum() / (sim.sum() + trk.sum())),
-                "distance_median_um": float(np.median(d)), "distance_p95_um": float(np.percentile(d, 95))}
+        sim, trk = signed_distance(x, self.bnd, q) < 0, self.wall(k, q)
+        return float(2 * (sim & trk).sum() / (sim.sum() + trk.sum()))
 
 
-_C = None
+_T = None
 
 
-def _frame(args):
-    global _C
-    if _C is None:
-        _C = Compare(args[0])
-    return _C.frame(args[1], args[2])
+def _dice(args):
+    global _T
+    if _T is None:
+        _T = Tracking(args[0])
+    return _T.dice(args[1], args[2])
 
 
 def compare(cfg):
-    """Step compare: simulation vs tracking, every frame -> OUTPUT_DIR/disp_constrain/compare.csv, compare.json, .png."""
-    import csv
+    """Step compare: wall Dice of every frame and the movie OUTPUT_DIR/disp_compare.mp4."""
     import multiprocessing as mp
-    r = np.load(cfg.output / "pv_results.npz")
-    u, frames = r["u"].astype(np.float64), [int(k) for k in r["frame"]]
-    with mp.Pool(max(1, int(cfg.MPI_RANKS))) as pool:
-        rows = pool.map(_frame, [(cfg, k, u[i]) for i, k in enumerate(frames)])
-    # misfit to the targets and the image force, area-weighted over the endo + epi nodes
-    w = model.read_wall(cfg)
-    pts = w["points"]
-    area, nrm = np.zeros(len(pts)), np.zeros((len(pts), 3))
-    for f in (w["endo"], w["epi"]):
-        cr = np.cross(pts[f[:, 1]] - pts[f[:, 0]], pts[f[:, 2]] - pts[f[:, 0]])
-        for j in range(3):
-            np.add.at(area, f[:, j], np.linalg.norm(cr, axis=1) / 6)
-            np.add.at(nrm, f[:, j], cr)
-    data = area > 0
-    a = area[data] / area[data].sum()
-    n = nrm[data] / np.linalg.norm(nrm[data], axis=1, keepdims=True)
-    weight = float(cfg.DISP_WEIGHT)
-    U = load_targets(cfg)
-    for i, row in enumerate(rows):
-        k = row["frame"]
-        d = U[k][data] - u[i][data]  # mm
-        row.update(t_ms=float(r["t_ms"][i]), P_kPa=float(r["P_kPa"][i]),
-                   misfit_rms_um=float(np.sqrt((a * (d ** 2).sum(1)).sum())) / cfg.MM_PER_UNIT,
-                   misfit_normal_rms_um=float(np.sqrt((a * np.einsum("nj,nj->n", d, n) ** 2).sum())) / cfg.MM_PER_UNIT,
-                   image_force_rms_kPa=weight * float(np.sqrt((a * (d ** 2).sum(1)).sum())))
-    out = cfg.output / "disp_constrain"
-    keys = ("frame", "t_ms", "P_kPa", "wall_dice", "distance_median_um", "distance_p95_um", "misfit_rms_um",
-            "misfit_normal_rms_um", "image_force_rms_kPa")
-    with open(out / "compare.csv", "w", newline="") as fh:
-        wr = csv.writer(fh)
-        wr.writerow(keys)
-        wr.writerows([[f"{row[c]:.6g}" if isinstance(row[c], float) else row[c] for c in keys] for row in rows])
-    col = {c: np.array([row[c] for row in rows]) for c in keys}
-    summary = {"weight_kPa_per_mm": weight, "frames": len(rows),
-               "wall_dice_mean": float(col["wall_dice"].mean()), "wall_dice_min": float(col["wall_dice"].min()),
-               "wall_dice_min_frame": int(col["frame"][np.argmin(col["wall_dice"])]),
-               "distance_median_um_mean": float(col["distance_median_um"].mean()),
-               "misfit_rms_um": float(np.sqrt((col["misfit_rms_um"] ** 2).mean())),
-               "misfit_normal_rms_um": float(np.sqrt((col["misfit_normal_rms_um"] ** 2).mean())),
-               "image_force_rms_kPa": float(np.sqrt((col["image_force_rms_kPa"] ** 2).mean())),
-               "P_max_kPa": float(col["P_kPa"].max())}
-    summary["image_force_over_P_max"] = summary["image_force_rms_kPa"] / summary["P_max_kPa"]
-    (out / "compare.json").write_text(json.dumps(summary, indent=1))
     from . import plots
-    plots.disp_constrain_figure(cfg, col)
-    print(json.dumps(summary, indent=1), flush=True)
+    r = np.load(cfg.output / "pv_results.npz")
+    u = r["u"].astype(np.float64)
+    with mp.Pool(max(1, int(cfg.MPI_RANKS))) as pool:
+        dice = pool.map(_dice, [(cfg, int(k), u[i]) for i, k in enumerate(r["frame"])])
+    print(f"wall Dice, simulation vs tracking: mean {np.mean(dice):.3f}, lowest {np.min(dice):.3f} "
+          f"(t{int(r['frame'][int(np.argmin(dice))])})", flush=True)
+    plots.disp_compare_movie(cfg, Tracking(cfg), np.array(dice))

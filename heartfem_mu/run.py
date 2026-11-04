@@ -43,7 +43,7 @@ class Step:
 
 PREPROCESS = Step("preprocess", "preprocess.main", "raw surfaces -> tetrahedral mesh, local frame, cut surfaces")
 DISP_TARGETS = Step("targets", "disp_constrain.targets", "tracked displacement of the wall nodes (DISP_CONSTRAIN)")
-DISP_COMPARE = Step("compare", "disp_constrain.compare", "simulation vs tracking: Dice, distance, image force (DISP_CONSTRAIN)")
+DISP_COMPARE = Step("compare", "disp_constrain.compare", "disp_compare.mp4: simulation over the tracking, wall Dice (DISP_CONSTRAIN)")
 ENDO_LAYER = Step("endo_layer", "myo_endo.grow_layer", "endocardial layer grown on the mesh (WALL = myo_endo)")
 PREPROCESS_LAYERS = Step("preprocess", "myo_endo.preprocess_layers",
                          "raw surfaces of both layers -> two-region tetrahedral mesh, local frame (WALL = myo_endo)")

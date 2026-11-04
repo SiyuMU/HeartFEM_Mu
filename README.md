@@ -20,8 +20,8 @@ The wall is the myocardium. The windkessel FE mode can also solve a wall of myoc
 surface, solved together with the myocardium (example `windkessel/FE_two_fibers_endo`).
 
 The volume_constrain FE mode can also pull the wall toward the tracked wall (`DISP_CONSTRAIN = True`): a traction
-`DISP_WEIGHT (u_img - u)` on the endocardium and epicardium, `u_img` the tracked displacement; the run reports the
-Dice coefficient and the distance to the tracking and the size of this traction (example
+`DISP_WEIGHT (u_img - u)` on the endocardium and epicardium, `u_img` the tracked displacement; the run adds the movie
+`disp_compare.mp4`: the simulated wall over the tracked wall, with the wall Dice of every frame (example
 `volume_constrain/FE_one_fiber_disp`).
 
 The FE solves a nonlinear problem per state (MPI on the CPU). The PINN is trained once per geometry, without FE or
@@ -45,7 +45,7 @@ HeartFEM_Mu/
 │   ├── fe.py              FE solver (dolfin): volume-driven problem (volume_constrain, windkessel), pressure-driven problem (invert_para, unloading)
 │   ├── pinn.py            PINN solver (torch): material laws, P2 discretization, the networks, energies, training
 │   ├── volume_constrain.py   task: P-V cycle (FE, PINN)
-│   ├── disp_constrain.py  displacement constraint of the volume_constrain FE (DISP_CONSTRAIN): tracked targets, comparison with the tracking
+│   ├── disp_constrain.py  displacement constraint of the volume_constrain FE (DISP_CONSTRAIN): tracked targets, wall Dice against the tracking
 │   ├── windkessel.py      task: P-V-t table (FE sweep, PINN), heartFEM table files, ngspice circuit, replay
 │   ├── invert_para.py     task: image misfit, search for C and T_MAX (FE, PINN), evaluation
 │   ├── unloading.py       task: unloaded geometry and C from the ED wall (topology, local-frame helper, result files)
@@ -119,7 +119,7 @@ python main.py --from solve     # this step and the following ones
 With `WALL = "myo_endo"` (windkessel FE) the step `endo_layer` (the endocardial layer grown on the mesh) follows
 `preprocess` (`ENDO_GROW = True`), or `preprocess` meshes both layers of the input surface (`ENDO_GROW = False`).
 With `DISP_CONSTRAIN = True` (volume_constrain FE) the steps are preprocess, targets (the tracked displacement of the
-wall nodes), solve, compare (Dice, distance to the tracking, image force), plot.
+wall nodes), solve, compare (the movie disp_compare.mp4, simulation over the tracking, with the wall Dice), plot.
 
 ## Settings
 Each example's `params.py` holds every setting of its mode; `main.py` refuses a `params.py` with a missing or unknown
@@ -195,7 +195,7 @@ Displacement constraint (`DISP_CONSTRAIN = True`), the wall pulled toward the tr
 
 | example | fibers | main result |
 |---|---|---|
-| `volume_constrain/FE_one_fiber_disp` | one fiber family, `DISP_WEIGHT` 30 kPa/mm | wall Dice vs tracking 0.772 (without the constraint 0.625); image force 0.199 kPa rms (13 % of peak P); peak P 1.566 kPa |
+| `volume_constrain/FE_one_fiber_disp` | one fiber family, `DISP_WEIGHT` 30 kPa/mm | wall Dice vs tracking, mean 0.772 (without the constraint 0.625); peak P 1.566 kPa (without 1.250) |
 
 Unloading (FE), from an ED wall made by inflating the t12 mesh (`input/ed.stl`), P_ED 0.1813 kPa and the unloaded
 cavity volume V0 0.6771818 nL:
