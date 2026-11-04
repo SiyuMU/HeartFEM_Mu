@@ -42,6 +42,8 @@ class Step:
 
 
 PREPROCESS = Step("preprocess", "preprocess.main", "raw surfaces -> tetrahedral mesh, local frame, cut surfaces")
+DISP_TARGETS = Step("targets", "disp_constrain.targets", "tracked displacement of the wall nodes (DISP_CONSTRAIN)")
+DISP_COMPARE = Step("compare", "disp_constrain.compare", "simulation vs tracking: Dice, distance, image force (DISP_CONSTRAIN)")
 ENDO_LAYER = Step("endo_layer", "myo_endo.grow_layer", "endocardial layer grown on the mesh (WALL = myo_endo)")
 PREPROCESS_LAYERS = Step("preprocess", "myo_endo.preprocess_layers",
                          "raw surfaces of both layers -> two-region tetrahedral mesh, local frame (WALL = myo_endo)")
@@ -149,6 +151,11 @@ WALL_MODES = {("windkessel", "FE")}  # the modes that accept WALL = "myo_endo"
 WALL_SETTINGS = _names("ENDO_GROW ENDO_PRESSURE_JUMP ENDO_MATERIAL")
 GROW_SETTINGS = _names("ENDO_THICKNESS_UM ENDO_SUBLAYERS")
 ENDO_MATERIAL_KEYS = _names("C C_FF C_SS C_NN C_NS C_FS C_FN T_MAX")
+# Displacement constraint (optional setting DISP_CONSTRAIN, volume_constrain FE only; absent = False): the wall pulled
+# toward the tracked wall with the weight DISP_WEIGHT (kPa/mm), steps targets (after preprocess) and compare (after
+# solve); disp_constrain.py.
+DISP_MODES = {("volume_constrain", "FE")}
+DISP_SETTINGS = _names("DISP_WEIGHT")
 
 
 def load(example):
@@ -185,8 +192,18 @@ def load(example):
                              f"(the input surface has both layers), got {grow!r}")
         expected |= set(WALL_SETTINGS) | (set(GROW_SETTINGS) if grow else set())
         not_read |= set() if grow else set(GROW_SETTINGS)
+    disp = values.get("DISP_CONSTRAIN", False)
+    if not isinstance(disp, bool):
+        raise ValueError(f"{params_file}: DISP_CONSTRAIN must be True or False, got {disp!r}")
+    if disp:
+        if (task, solver) not in DISP_MODES:
+            raise ValueError(f"{params_file}: DISP_CONSTRAIN = True (displacement constraint) is available for TASK = "
+                             f"'volume_constrain', SOLVER = 'FE' only, got TASK = {task!r}, SOLVER = {solver!r}")
+        expected |= set(DISP_SETTINGS)
+    else:
+        not_read |= set(DISP_SETTINGS)
     missing = sorted(expected - set(values))
-    unknown = sorted(set(values) - expected - not_read - {"WALL"})
+    unknown = sorted(set(values) - expected - not_read - {"WALL", "DISP_CONSTRAIN"})
     if missing or unknown:
         raise ValueError(f"{params_file}: settings do not fit TASK = {task!r}, SOLVER = {solver!r}"
                          + (f"; missing: {', '.join(missing)}" if missing else "")
@@ -277,16 +294,22 @@ def step_process(cfg, step, base, args=()):
 
 def pipeline(cfg):
     """The steps of the example's mode; WALL = "myo_endo" adds the step endo_layer after preprocess (ENDO_GROW) or meshes
-    both layers in the step preprocess (ENDO_GROW False)."""
+    both layers in the step preprocess (ENDO_GROW False); DISP_CONSTRAIN adds targets after preprocess and compare after
+    solve."""
     steps = PIPELINES[cfg.TASK, cfg.SOLVER]
     if getattr(cfg, "WALL", "myo") == "myo_endo":
         steps = steps[:1] + (ENDO_LAYER,) + steps[1:] if cfg.ENDO_GROW else (PREPROCESS_LAYERS,) + steps[1:]
+    if getattr(cfg, "DISP_CONSTRAIN", False):  # targets after preprocess, compare after solve
+        names = [s.name for s in steps]
+        i = names.index("solve")
+        steps = steps[:1] + (DISP_TARGETS,) + steps[1:i + 1] + (DISP_COMPARE,) + steps[i + 1:]
     return steps
 
 
 def run_steps(cfg, steps):
     base = conda_base()
     print(f"== {cfg.root.name}: TASK {cfg.TASK}, SOLVER {cfg.SOLVER}, fibers: {'two families' if cfg.TWO_FIBERS else 'one family'}"
+          + (f"; displacement constraint, weight {cfg.DISP_WEIGHT} kPa/mm" if getattr(cfg, "DISP_CONSTRAIN", False) else "")
           + ("; wall: myocardium + endocardial layer" + (" (grown)" if cfg.ENDO_GROW else " (from the input surface)")
              if getattr(cfg, "WALL", "myo") == "myo_endo" else "")
           + f"; steps {', '.join(s.name for s in steps)}", flush=True)
@@ -296,6 +319,9 @@ def run_steps(cfg, steps):
     unused = [k for k in GROW_SETTINGS if getattr(cfg, "WALL", "myo") == "myo_endo" and not cfg.ENDO_GROW and hasattr(cfg, k)]
     if unused:
         print(f"   ({', '.join(unused)} in params.py not used: ENDO_GROW = False)", flush=True)
+    unused = [k for k in DISP_SETTINGS if not getattr(cfg, "DISP_CONSTRAIN", False) and hasattr(cfg, k)]
+    if unused:
+        print(f"   ({', '.join(unused)} in params.py not used: DISP_CONSTRAIN = False)", flush=True)
     t0 = time.time()
     for i, step in enumerate(steps, 1):
         print(f"== step {i}/{len(steps)}: {step.name} ({step.about}) {time.strftime('%F %T')}", flush=True)

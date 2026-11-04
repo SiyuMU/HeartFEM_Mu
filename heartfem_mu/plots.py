@@ -13,6 +13,8 @@
                 pv_cycle.mp4              the coupled cycle state by state: the deforming wall on a long-axis section
                                           coloured by the fiber stress, next to the atrial P-V loop
     invert_comparison invert_para, step evaluate: comparison.png (long-axis sections, tracking vs model)
+    disp_constrain_figure  volume_constrain with DISP_CONSTRAIN, step compare: disp_constrain/disp_constrain.png
+                      (wall Dice and surface distance against the tracking, misfit, image force and cavity pressure)
 The colour of the solver: FE blue, PINN orange (volume_constrain).
 """
 import csv
@@ -154,6 +156,42 @@ def pv_loop(cfg):
         fig.savefig(cfg.output / f"pv_loop.{ext}")
     plt.close(fig)
     print("wrote", cfg.output / "pv_loop.png", "and .pdf", flush=True)
+
+
+def disp_constrain_figure(cfg, col):
+    """OUTPUT_DIR/disp_constrain/disp_constrain.png from the columns of compare.csv: (a) wall Dice, (b) surface distance,
+    (c) misfit to the targets, (d) image force and cavity pressure, over one cycle from the maximum volume."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.rcParams.update({"font.size": 8, "axes.spines.top": False, "axes.spines.right": False, "axes.linewidth": 0.6,
+                         "lines.linewidth": 1.4, "pdf.fonttype": 42, "savefig.dpi": 300})
+    k = col["frame"]
+    ed = int(np.argmax(model.frame_volumes(cfg)))
+    t = np.mod(k - ed, cfg.N_FRAMES) * cfg.BCL_MS / cfg.N_FRAMES
+    o = np.argsort(t)
+    fig, ax = plt.subplots(1, 4, figsize=(10.4, 2.6), layout="constrained")
+    ax[0].plot(t[o], col["wall_dice"][o], color=BLUE)
+    ax[0].set(ylabel="wall Dice", ylim=(0, 1), title="(a) Dice, simulation vs tracking")
+    ax[1].plot(t[o], col["distance_median_um"][o], color=BLUE, label="median")
+    ax[1].plot(t[o], col["distance_p95_um"][o], color=BLUE, ls="--", label="95 %")
+    ax[1].set(ylabel="um", title="(b) surface distance")
+    ax[1].legend(frameon=False)
+    ax[2].plot(t[o], col["misfit_rms_um"][o], color=GREY, label="vector")
+    ax[2].plot(t[o], col["misfit_normal_rms_um"][o], color=GREY, ls="--", label="normal")
+    ax[2].set(ylabel="um", title="(c) misfit to the targets (rms)")
+    ax[2].legend(frameon=False)
+    ax[3].plot(t[o], col["P_kPa"][o], color=BLUE, label="cavity pressure")
+    ax[3].plot(t[o], col["image_force_rms_kPa"][o], color=ORANGE, label="image force (rms)")
+    ax[3].set(ylabel="kPa", title=f"(d) w = {cfg.DISP_WEIGHT:g} kPa/mm")
+    ax[3].legend(frameon=False)
+    for a in ax:
+        a.set_xlabel(f"time since max volume, t{ed} (ms)")
+        a.set_xlim(0, cfg.BCL_MS)
+        a.grid(alpha=0.25, lw=0.5)
+    fig.savefig(cfg.output / "disp_constrain" / "disp_constrain.png")
+    plt.close(fig)
+    print("wrote", cfg.output / "disp_constrain" / "disp_constrain.png", flush=True)
 
 
 def pv_movie(cfg):

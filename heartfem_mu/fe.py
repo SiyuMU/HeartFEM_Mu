@@ -15,6 +15,9 @@ the volume-driven problem the cavity pressure P (one number).
                     sigma_ff = family 1, sigma_ff2 = family 2; Ct = sum_i w_i Ct_i.
     Boundaries:     base u.n = 0; no rigid translation in the base plane and no rotation; epicardial spring
                     K (u.N) N with K = K_SPRING (heartFEM; default 0: none).
+    Displacement constraint (volume_constrain, DISP_CONSTRAIN; disp_constrain.py): traction w (u_img - u) on the
+                    endocardium and epicardium, i.e. the energy w/2 int |u - u_img|^2 dS, w = DISP_WEIGHT (kPa/mm),
+                    u_img = the tracked displacement of the frame (P1); absent when DISP_CONSTRAIN is off.
     Myocardium + endocardium (WALL = "myo_endo", windkessel; mesh, regions and fibers: myo_endo.py): the same laws in
                     both regions with the values per cell (DG0 fields): C, C_ij, T_MAX and the fiber shares of the
                     myocardium (params) or of the layer (ENDO_MATERIAL); the activation timing is shared. The cavity is
@@ -198,7 +201,8 @@ class Newton:
 
 # ==================== 2. volume-driven problem (volume_constrain, windkessel) ====================
 class VolumeProblem(Newton):
-    def __init__(self, cfg, comm, g, R, mesh_h5):
+    def __init__(self, cfg, comm, g, R, mesh_h5, image_w=None):
+        """image_w: weight of the displacement constraint (kPa/mm); None: no constraint term (the form is unchanged)."""
         self.cfg = cfg
         L = float(np.ptp(g["points"], 0).max())
         mesh, marker = read_mesh(comm, mesh_h5)
@@ -303,6 +307,10 @@ class VolumeProblem(Newton):
         self.R_form = derivative(energy, w, wt) + F_act
         if cfg.K_SPRING > 0:  # epicardial spring of heartFEM: traction -K (u . N) N
             self.R_form = self.R_form + Constant(cfg.K_SPRING) * inner(dot(u, N) * N, v) * ds(EPI_ID)
+        self.image = None
+        if image_w is not None:  # displacement constraint: traction w (u_img - u) on the endocardium and epicardium
+            self.image = self.image_target(g, R)
+            self.R_form = self.R_form + Constant(float(image_w)) * inner(u - self.image["u"], v) * (ds(ENDO_ID) + ds(EPI_ID))
         self.Jac = derivative(self.R_form, w, dw)
         self.A = self.ksp = None
         self.V0 = assemble(self.vol_form)
@@ -322,6 +330,29 @@ class VolumeProblem(Newton):
         return {"Cs": [per_cell(k) for k in ("C", "C_FF", "C_SS", "C_NN", "C_NS", "C_FS", "C_FN")],
                 "T_MAX": per_cell("T_MAX"), "weights": [self.cell_field(DG0, w_) for w_ in g["cell_weights"]],
                 "chi": self.cell_field(DG0, myo.astype(float))}
+
+    def image_target(self, g, R):
+        """P1 function u_img and the map from its owned vertex dofs to the t0.vtu nodes (displacement constraint)."""
+        u_img = Function(VectorFunctionSpace(self.mesh, "CG", 1))
+        v2d = vertex_to_dof_map(u_img.function_space()).reshape(-1, 3)
+        own = (v2d < u_img.vector().local_size()).all(1)
+        dist, node = cKDTree((g["points"] - g["base_origin"]) @ R.T).query(self.mesh.coordinates()[own])
+        assert dist.max() < 1e-9, "vertex not found in the input mesh"
+        return {"u": u_img, "R": R, "dofs": v2d[own], "nodes": node, "prev": None, "next": None}
+
+    def set_image_frames(self, U_prev, U_next):
+        """Image displacement (t0.vtu node order, original frame, mm) at the start and at the end of a continuation."""
+        im = self.image
+        im["prev"], im["next"] = ((U @ im["R"].T)[im["nodes"]] for U in (U_prev, U_next))
+
+    def set_image(self, s):
+        """u_img = (1 - s) U_prev + s U_next: the image target follows the continuation parameter of (V, t)."""
+        im = self.image
+        arr = np.zeros(im["u"].vector().local_size())
+        arr[im["dofs"]] = (1 - s) * im["prev"] + s * im["next"]
+        im["u"].vector().set_local(arr)
+        im["u"].vector().apply("insert")
+        as_backend_type(im["u"].vector()).update_ghost_values()
 
     def myo_mean(self, expr):
         """WALL = "myo_endo": mean of expr over the myocardium."""
@@ -353,6 +384,8 @@ class VolumeProblem(Newton):
             s_new = 1.0 if 1.0 - (s + h) < 0.2 * h else s + h
             V, x = (start[i] + s_new * (target[i] - start[i]) for i in (0, 1))
             self.set_target(V, x)
+            if self.image is not None:
+                self.set_image(s_new)
             saved = self.w.vector().copy()
             final = s_new == 1.0
             ok, its, res = self.newton((1e-9 if final else 1e-6) * self.R_ref)
@@ -369,13 +402,15 @@ class VolumeProblem(Newton):
                     return False, its, res
 
 
-def solve_states(cfg, g, R, mesh_h5, order, x, volume, out, name, describe, row):
+def solve_states(cfg, g, R, mesh_h5, order, x, volume, out, name, describe, row, image=None):
     """Solve the states k in `order`, each from the previous solution (the first from the reference state u = 0), and
     gather u and the stresses on rank 0 after each state into model.States(out, name).
     x[k]: activation time unwrapped along the solve order; volume(pb, k): target cavity volume (mm^3);
-    describe(k, V): start of the log line; row(k, P, V, T_mean, u_max_um, newton_its, seconds): summary row.
+    describe(k, V): start of the log line; row(k, P, V, T_mean, u_max_um, newton_its, seconds): summary row;
+    image: None, or (w, U) for the displacement constraint (U[k]: image displacement of state k, t0.vtu node order, mm).
     Returns (States, info) on rank 0."""
-    pb = VolumeProblem(cfg, COMM, g, R, mesh_h5)
+    pb = VolumeProblem(cfg, COMM, g, R, mesh_h5, image_w=None if image is None else image[0])
+    U_prev = None if image is None else np.zeros_like(image[1][0])  # image displacement of the reference state: 0
     mesh = pb.mesh
     log(f"{COMM.size} ranks, {pb.W.dim()} unknowns, V0 {pb.V0 * 1e3:.5f} nL")
     t_solve = time.time()
@@ -440,9 +475,13 @@ def solve_states(cfg, g, R, mesh_h5, order, x, volume, out, name, describe, row)
     current, prev = (pb.V0, float(x[order[0]])), None
     for k in order:
         target, t0 = (volume(pb, k), float(x[k])), time.time()
+        if image is not None:
+            pb.set_image_frames(U_prev, image[1][k])
         vec0 = pb.w.vector().copy()
         if prev is not None:  # linear extrapolation from the last two states, kept if it lowers the residual
             pb.set_target(*target)
+            if image is not None:
+                pb.set_image(1.0)
             r0 = pb.residual().norm("l2")
             pb.set_vector(vec0 + (vec0 - prev))
             r1 = pb.residual().norm("l2")
@@ -469,6 +508,8 @@ def solve_states(cfg, g, R, mesh_h5, order, x, volume, out, name, describe, row)
         if RANK == 0:
             states.add(k, row(k, P, V, T_mean, 1e3 * np.linalg.norm(u, axis=1).max(), its, time.time() - t0), u, fields)
         prev, current = vec0, target
+        if image is not None:
+            U_prev = image[1][k]
     info = {"mpi_ranks": COMM.size, "unknowns": pb.W.dim(), "nodes": len(g["points"]), "tetrahedra": len(g["cells"]),
             "solve_s": round(time.time() - t_solve, 1)}
     return states, info

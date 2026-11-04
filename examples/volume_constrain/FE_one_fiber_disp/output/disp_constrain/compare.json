@@ -1,0 +1,13 @@
+{
+ "weight_kPa_per_mm": 30.0,
+ "frames": 52,
+ "wall_dice_mean": 0.7724826819492059,
+ "wall_dice_min": 0.5562858925681893,
+ "wall_dice_min_frame": 50,
+ "distance_median_um_mean": 1.9054261434518454,
+ "misfit_rms_um": 6.649684708764649,
+ "misfit_normal_rms_um": 3.4874868452825716,
+ "image_force_rms_kPa": 0.1994905412629395,
+ "P_max_kPa": 1.565820954262284,
+ "image_force_over_P_max": 0.1274031623602373
+}
