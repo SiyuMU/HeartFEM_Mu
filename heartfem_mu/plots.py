@@ -14,7 +14,8 @@
                                           coloured by the fiber stress, next to the atrial P-V loop
     invert_comparison invert_para, step evaluate: comparison.png (long-axis sections, tracking vs model)
     disp_compare_movie  volume_constrain with DISP_CONSTRAIN, step compare: disp_compare.mp4 (the simulated wall on
-                      the long-axis section, coloured by sigma_ff, over the tracked wall, with the wall Dice)
+                      three long-axis sections and one short-axis section, coloured by sigma_ff, over the base-flattened
+                      tracked wall, with the wall Dice)
 The colour of the solver: FE blue, PINN orange (volume_constrain).
 """
 import csv
@@ -211,10 +212,35 @@ def pv_movie(cfg):
     print("wrote", cfg.output / "pv_cycle.mp4", flush=True)
 
 
+DISP_SHORT_AXIS_UM = 50.0  # disp_compare.mp4: depth of the short-axis section below the base plane (mesh units = um)
+DISP_SFF_LIM_KPA = 10.0    # disp_compare.mp4: colour limit of sigma_ff, fixed so that runs of different DISP_WEIGHT compare
+
+
+def plane_section(x, cells, values, o, n, e_u, e_v):
+    """Polygons (coordinates along e_u, e_v from o) and values of the tetrahedra (cells, vertices x) cut by the plane
+    through o with normal n."""
+    dc = ((x - o) @ n)[cells]
+    polys, vals = [], []
+    for c in np.where((dc.min(1) < 0) & (dc.max(1) > 0))[0]:
+        p = []
+        for i, j in ((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)):
+            if (dc[c, i] < 0) != (dc[c, j] < 0):
+                xi, xj = x[cells[c, i]], x[cells[c, j]]
+                p.append(xi + dc[c, i] / (dc[c, i] - dc[c, j]) * (xj - xi))
+        uv = (np.array(p) - o) @ np.c_[e_u, e_v]
+        ctr = uv.mean(0)
+        polys.append(uv[np.argsort(np.arctan2(uv[:, 1] - ctr[1], uv[:, 0] - ctr[0]))])
+        vals.append(values[c])
+    return polys, np.array(vals)
+
+
 def disp_compare_movie(cfg, trk, dice):
-    """OUTPUT_DIR/disp_compare.mp4 (DISP_CONSTRAIN): one cycle from the maximum volume, the simulated wall on the
-    long-axis section of pv_cycle.mp4 coloured by sigma_ff (same colour scale) over the tracked wall of the frame (trk:
-    disp_constrain.Tracking; blurred grey band, solid / dashed epi / endo outline), title: frame, P and wall Dice."""
+    """OUTPUT_DIR/disp_compare.mp4 (DISP_CONSTRAIN): one cycle from the maximum volume, the simulated wall coloured by
+    sigma_ff (fixed colour scale, DISP_SFF_LIM_KPA) with a black outline over the base-flattened tracked wall of the
+    frame (trk: disp_constrain.Tracking; grey band, solid / dashed epi / endo outline), on four sections: three through
+    the long axis and the base centre at 0, 60 and 120 deg around the long axis (0 deg: normal to the x axis of the input
+    projected on the base plane; dotted line: the base plane) and one short-axis section DISP_SHORT_AXIS_UM below the
+    base plane; title: frame, P and wall Dice."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -226,49 +252,56 @@ def disp_compare_movie(cfg, trk, dice):
         return
     r = np.load(cfg.output / "pv_results.npz")
     X, cells = r["points"] / cfg.MM_PER_UNIT, r["cells"]
-    section, o, e1, n = long_axis_section(cfg, X, cells)
-    sff = r["sigma_ff"]
-    lim = float(np.ceil(np.percentile(np.abs(sff[:, r["far_from_base"]]), 99.5)))
+    sff, lim = r["sigma_ff"], DISP_SFF_LIM_KPA
     k, V, P = r["frame"], r["V_nL"], r["P_kPa"]
     order = np.roll(np.arange(len(k)), -int(np.argmax(V)))  # one cycle from the maximum volume
-    ext = np.concatenate([((X + 1e3 * r["u"][i]) - o) @ np.c_[e1, n] for i in range(len(k))]
-                         + [(trk.X[kk] - o) @ np.c_[e1, n] for kk in k])
-    ext = ext[ext[:, 1] > -8]  # the tracked surfaces continue above the base plane
-    h = 0.5
-    gu = np.arange(ext[:, 0].min() - 5, ext[:, 0].max() + 5, h)
-    gv = np.arange(-6, ext[:, 1].max() + 5, h)
-    U, W = np.meshgrid(gu, gv)
-    q = o + U.ravel()[:, None] * e1 + W.ravel()[:, None] * n
-    fig, ax = plt.subplots(figsize=(7.2, 6.4))
-    band = ax.imshow(np.zeros_like(U), extent=(gu[0], gu[-1], gv[-1], gv[0]), cmap="Greys", vmin=0, vmax=3,
-                     interpolation="bilinear")
-    pc = PolyCollection([], cmap="RdBu_r", edgecolors="face", linewidths=0.2, alpha=0.9)
-    pc.set_clim(-lim, lim)
-    ax.add_collection(pc)
-    ax.set_xlim(gu[0], gu[-1])
-    ax.set_ylim(gv[-1], gv[0])  # base on top, apex at the bottom
-    ax.set_aspect("equal")
-    ax.set(xlabel="µm", ylabel="distance from the base plane (µm)")
-    ax.spines[["top", "right"]].set_visible(False)
-    fig.colorbar(pc, ax=ax, shrink=0.8, extend="both", label="fiber stress σ$_{ff}$ (kPa)")
-    title = ax.set_title("", loc="left", fontsize=10)
-    fig.tight_layout()
-    outlines = []
-    with writer.saving(fig, str(cfg.output / "disp_compare.mp4"), dpi=130):
+    xs = [X + r["u"][i] / cfg.MM_PER_UNIT for i in range(len(k))]
+    axis = -trk.n_out  # long axis, base -> apex
+    o = X[trk.base_nodes].mean(0)
+    e1 = np.cross(axis, [1.0, 0, 0])
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(axis, e1)
+    views = []  # (title, origin, normal, e_u, e_v)
+    for ang in (0, 60, 120):
+        eh = np.cos(np.radians(ang)) * e1 + np.sin(np.radians(ang)) * e2
+        views.append((f"long axis {ang}°", o, np.cross(axis, eh), eh, -axis))
+    views.append((f"short axis, {DISP_SHORT_AXIS_UM:g} µm below the base", o + DISP_SHORT_AXIS_UM * axis, axis, e1, e2))
+    grids = []
+    for _, oo, _, eu, ev in views:  # plane extent: all simulated and tracked positions, projected
+        uv = np.concatenate([(x - oo) @ np.c_[eu, ev] for x in xs] + [(trk.X[kk] - oo) @ np.c_[eu, ev] for kk in k])
+        gu, gv = np.arange(uv[:, 0].min() - 5, uv[:, 0].max() + 5, 0.5), np.arange(uv[:, 1].min() - 5, uv[:, 1].max() + 5, 0.5)
+        U, W = np.meshgrid(gu, gv)
+        grids.append((gu, gv, oo + U.ravel()[:, None] * eu + W.ravel()[:, None] * ev, U.shape))
+    width = [g[0][-1] - g[0][0] for g in grids]
+    fig, ax = plt.subplots(1, len(views), figsize=(18.8, 5.6), gridspec_kw={"width_ratios": width})
+    fig.subplots_adjust(left=0.01, right=0.93, top=0.86, bottom=0.03, wspace=0.05)
+    sm = plt.cm.ScalarMappable(cmap="RdBu_r", norm=plt.Normalize(-lim, lim))
+    fig.colorbar(sm, cax=fig.add_axes([0.945, 0.15, 0.01, 0.6]), extend="both").set_label("fiber stress σ$_{ff}$ (kPa)")
+    title = fig.suptitle("")
+    with writer.saving(fig, str(cfg.output / "disp_compare.mp4"), dpi=100):
         for i in order:
-            Xk = trk.X[k[i]]
-            s_epi = signed_distance(Xk, trk.epi_f, q).reshape(U.shape)
-            s_endo = signed_distance(Xk, trk.endo_f, q).reshape(U.shape)
-            band.set_data(gaussian_filter(((s_epi < 0) & (s_endo > 0)).astype(float), 1.5))
-            for c in outlines:
-                c.remove()
-            outlines = [ax.contour(gu, gv, s_epi, [0], colors="0.45", linewidths=0.8),
-                        ax.contour(gu, gv, s_endo, [0], colors="0.45", linewidths=0.8, linestyles="--")]
-            polys, vals = section(X + 1e3 * r["u"][i], sff[i])
-            pc.set_verts(polys)
-            pc.set_array(vals)
-            title.set_text(f"t{k[i]:02d}   P = {P[i]:.2f} kPa   wall Dice = {dice[i]:.2f}\n"
-                           f"colour: simulation (w = {cfg.DISP_WEIGHT:g} kPa/mm), grey: tracking")
+            (xe, fe), (xp, fp) = trk.surface(k[i], "endo"), trk.surface(k[i], "epi")
+            for a, (name, oo, nrm, eu, ev), (gu, gv, q, shape) in zip(ax, views, grids):
+                s_endo, s_epi = signed_distance(xe, fe, q).reshape(shape), signed_distance(xp, fp, q).reshape(shape)
+                a.cla()
+                a.imshow(gaussian_filter(((s_epi < 0) & (s_endo > 0)).astype(float), 1.5), origin="lower",
+                         extent=(gu[0], gu[-1], gv[0], gv[-1]), cmap="Greys", vmin=0, vmax=2.4)
+                a.contour(gu, gv, s_epi, [0], colors="0.55", linewidths=0.8)
+                a.contour(gu, gv, s_endo, [0], colors="0.55", linewidths=0.8, linestyles="--")
+                polys, vals = plane_section(xs[i], cells, sff[i], oo, nrm, eu, ev)
+                pc = PolyCollection(polys, array=vals, cmap="RdBu_r", edgecolors="face", linewidths=0.2, alpha=0.9)
+                pc.set_clim(-lim, lim)
+                a.add_collection(pc)
+                a.contour(gu, gv, signed_distance(xs[i], trk.bnd, q).reshape(shape), [0], colors="k", linewidths=0.7)
+                if abs(nrm @ axis) < 0.5:  # long-axis section: the base plane
+                    a.axhline(0, color=BLUE, lw=0.8, ls=":")
+                a.set(xlim=(gu[0], gu[-1]), ylim=(gv[0], gv[-1]), aspect="equal", xticks=[], yticks=[])
+                a.set_title(name)
+                for sp in a.spines.values():
+                    sp.set_visible(False)
+            title.set_text(f"t{k[i]:02d}   P = {P[i]:.2f} kPa   wall Dice = {dice[i]:.2f}   (DISP_WEIGHT = {cfg.DISP_WEIGHT:g} kPa/mm)\n"
+                           "colour + black outline: simulation; grey: tracking (base flattened; solid epi, dashed endo); "
+                           "dotted: base plane")
             writer.grab_frame()
     print("wrote", cfg.output / "disp_compare.mp4", flush=True)
 

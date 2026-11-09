@@ -3,11 +3,11 @@
  "unknowns": 112832,
  "nodes": 5708,
  "tetrahedra": 19472,
- "solve_s": 496.9,
+ "solve_s": 517.1,
  "frames": 52,
- "mean_frame_s": 9.5,
- "max_frame_s": 14.8,
- "newton_its_total": 194,
- "total_s": 527.1,
- "date": "2026-11-04 12:23"
+ "mean_frame_s": 9.8,
+ "max_frame_s": 19.7,
+ "newton_its_total": 204,
+ "total_s": 581.9,
+ "date": "2026-11-09 23:19"
 }

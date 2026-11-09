@@ -4,21 +4,26 @@ The FE (fe.VolumeProblem) adds the traction w (u_img - u) on the endocardium and
 w/2 int |u - u_img|^2 dS, w = DISP_WEIGHT (kPa/mm); everything else is the volume_constrain FE. The traction is a force
 that the real heart does not have ("image force"): w balances closeness to the tracking against it, and it is reported.
 
-Steps (CONDA_ENV, numpy + scipy; compare also vtk, matplotlib):
-  targets  u_img of every endocardial / epicardial node of mesh/t0.vtu (the reference frame): the node is attached to the
-           closest point of the same surface (endo / epi) of the tracked reference frame (input t<ref>.stl), as
-           barycentric coordinates in one triangle; all tracked frames share the triangle order, so the point is followed
-           through the cycle. Rigid motion of the tracking is removed per frame (least-squares rotation + translation of
-           all tracked vertices onto the reference frame; the model has no rigid motion). u_img(ref) = 0.
-           -> OUTPUT_DIR/mesh/disp_targets.npz (an input of the step solve, next to the other preprocess products)
-  compare  the movie OUTPUT_DIR/disp_compare.mp4 (plots.disp_compare_movie): every frame, the simulated wall on the
-           long-axis section of pv_cycle.mp4, coloured by sigma_ff, over the tracked wall (rigidly aligned as above,
-           blurred grey band, endo / epi outlines), with the wall Dice of the frame: voxels of DICE_VOXEL_UM at least
-           BASE_EXCLUDE_UM below the base plane, tracked wall = inside the epicardium and outside the endocardium of the
-           closed input surfaces, simulated wall = inside the closed boundary of the deformed mesh.
-"""
-import struct
+Tracked wall = the cut surfaces of the preprocess (mesh/surface_cut/t*.stl: endocardium and epicardium cut at the base
+plane of the reference frame, followed through the cycle by the tracking; all frames share the triangles), with the base
+flattened: (1) rigid alignment of every frame onto the reference frame (least-squares rotation + translation of all
+cut-surface vertices; the model has no rigid motion); (2) the rim (open edge) moved back into the base plane along its
+normal, since the model holds its base in the plane (u . n = 0): every vertex gets the normal correction of the nearest
+rim vertex of its surface, weighted by phi(d) = (1 + cos(pi d / L)) / 2 for d < L = FLAT_DEPTH_UM (d: depth below the
+base plane in the reference frame), 0 below; in-plane positions unchanged. The targets AND the prescribed cavity
+volumes come from these surfaces, and the Dice compares with them directly (bases aligned by construction).
 
+Steps (CONDA_ENV, numpy + scipy + meshio; compare also vtk, matplotlib):
+  targets  u_img of every endocardial / epicardial node of mesh/t0.vtu (the reference frame): the node is attached to the
+           closest point of the same surface of the flattened reference frame, as barycentric coordinates in one
+           triangle, and followed through the flattened frames; u_img(ref) = 0. Cavity volume of every flattened frame
+           (endocardium closed by cones to the base-plane origin, as model.frame_volumes).
+           -> OUTPUT_DIR/mesh/disp_targets.npz (an input of the step solve, next to the other preprocess products)
+  compare  the wall Dice of every frame (voxels of DICE_VOXEL_UM below the base plane; tracked wall = inside the
+           epicardium and outside the endocardium of the flattened surfaces, each closed by a fan over its rim;
+           simulated wall = inside the closed boundary of the deformed mesh) and the movie OUTPUT_DIR/disp_compare.mp4
+           (plots.disp_compare_movie: three long-axis sections and one short-axis section).
+"""
 import numpy as np
 from scipy.spatial import cKDTree
 
@@ -26,49 +31,57 @@ from . import model
 
 DICE_VOXEL_UM = 1.0     # voxel edge of the wall Dice (mesh units = um)
 NEAR_UM = 12.0          # Dice voxels farther than this from both walls are outside both (skipped for speed)
+FLAT_DEPTH_UM = 20.0    # L: depth below the base plane over which the base flattening fades out (mesh units = um)
 
 
 # ==================== tracked surfaces ====================
-def read_stl_soup(path):
-    """Triangle vertices of a binary STL in file order, (n_triangles x 3, 3); the order is the tracking's correspondence."""
-    b = path.read_bytes()
-    n = struct.unpack("<I", b[80:84])[0]
-    if len(b) != 84 + 50 * n:
-        raise ValueError(f"{path}: not a binary STL")
-    a = np.frombuffer(b[84:84 + 50 * n], dtype=np.dtype([("n", "<3f4"), ("v", "<9f4"), ("a", "<u2")]))
-    return a["v"].reshape(-1, 3).astype(np.float64)
-
-
-def tracked(cfg):
-    """Welded vertices of every tracked frame (frames, V, 3) in mesh units, the triangles, the per-triangle surface (0 endo,
-    1 epi) and the rigid alignment of every frame onto the reference frame (applied)."""
-    from scipy.sparse import coo_matrix
-    from scipy.sparse.csgraph import connected_components
+def flattened(cfg):
+    """The cut surfaces of every frame, rigidly aligned onto the reference frame and base-flattened: vertices (frames, V, 3)
+    in mesh units, triangles, per-triangle surface label (1 endo, 2 epi), and per frame the removed rigid rotation (deg),
+    the centroid shift and the largest rim height above the base plane before the flattening (mesh units)."""
+    import meshio
+    w = model.read_wall(cfg)
+    n_out = w["n_out"]
+    level = float(np.median(w["points"][w["base_nodes"]] @ n_out)) / cfg.MM_PER_UNIT  # base plane: x . n_out = level
+    lab = np.load(cfg.mesh / "surface_cut" / "correspondence.npz")["surface_labels"]
     ref = model.reference_frame(cfg)
-    soup = read_stl_soup(cfg.input / f"t{ref}.stl")
-    _, idx, inv = np.unique(np.round(soup, 6), axis=0, return_index=True, return_inverse=True)
-    tri = inv.ravel().reshape(-1, 3)
-    X = np.empty((cfg.N_FRAMES, len(idx), 3))
+    X, tri = np.empty((cfg.N_FRAMES,) + meshio.read(cfg.mesh / "surface_cut" / f"t{ref}.stl").points.shape), None
     for k in range(cfg.N_FRAMES):
-        s = read_stl_soup(cfg.input / f"t{k}.stl")
-        if len(s) != len(soup):
-            raise ValueError(f"t{k}.stl: the tracked frames must share the triangles of t{ref}.stl")
-        X[k] = s[idx]
-    e = np.concatenate((tri[:, [0, 1]], tri[:, [1, 2]]))
-    _, comp = connected_components(coo_matrix((np.ones(len(e)), (e[:, 0], e[:, 1])), shape=(len(idx),) * 2), directed=False)
-    if comp.max() != 1:
-        raise ValueError("the tracked surface must consist of two closed surfaces (endocardium, epicardium)")
-    x = X[ref][tri]
-    vol = [abs(np.einsum("ij,ij->i", x[comp[tri[:, 0]] == c, 0],
-                         np.cross(x[comp[tri[:, 0]] == c, 1], x[comp[tri[:, 0]] == c, 2])).sum()) for c in (0, 1)]
-    side = (comp[tri[:, 0]] != int(np.argmin(vol))).astype(int)  # the smaller volume is the endocardium
-    rigid = []
+        m = meshio.read(cfg.mesh / "surface_cut" / f"t{k}.stl")
+        X[k] = m.points
+        t = m.cells_dict["triangle"].astype(np.int64)
+        if tri is None:
+            tri = t
+        elif not np.array_equal(t, tri):
+            raise ValueError(f"surface_cut/t{k}.stl: the cut frames must share the triangles")
+    X0 = X[ref].copy()
+    d = np.clip(level - X0 @ n_out, 0, None)
+    phi = np.where(d < FLAT_DEPTH_UM, 0.5 * (1 + np.cos(np.pi * d / FLAT_DEPTH_UM)), 0.0)
+    nearest = {}  # surface -> (its vertices, the nearest rim vertex of each)
+    for s in (1, 2):
+        f = tri[lab == s]
+        e, c = np.unique(np.sort(np.concatenate((f[:, [0, 1]], f[:, [1, 2]], f[:, [2, 0]])), 1), axis=0, return_counts=True)
+        rim, verts = np.unique(e[c == 1]), np.unique(f)
+        nearest[s] = (verts, rim[cKDTree(X0[rim]).query(X0[verts])[1]])
+    info = []
     for k in range(cfg.N_FRAMES):
-        Rm, t = rigid_to(X[k], X[ref])
-        rigid.append((np.degrees(np.arccos(np.clip((np.trace(Rm) - 1) / 2, -1, 1))),
-                      np.linalg.norm(X[k].mean(0) - X[ref].mean(0))))  # rotation (deg), centroid shift (mesh units)
+        Rm, t = rigid_to(X[k], X0)
+        shift = np.linalg.norm(X[k].mean(0) - X0.mean(0))
         X[k] = X[k] @ Rm.T + t
-    return X, tri, side, np.array(rigid)
+        h = X[k] @ n_out - level  # height above the base plane
+        rim_h = 0.0
+        for verts, near in nearest.values():
+            rim_h = max(rim_h, np.abs(h[near]).max())
+            X[k][verts] -= (h[near] * phi[verts])[:, None] * n_out
+        info.append((np.degrees(np.arccos(np.clip((np.trace(Rm) - 1) / 2, -1, 1))), shift, rim_h))
+    return X, tri, lab, np.array(info)
+
+
+def cavity_volume(x, tri, lab, origin):
+    """Cavity volume of one frame: the endocardial triangles closed by cones to the base-plane origin (as
+    model.frame_volumes), mesh units^3."""
+    v = x[tri[lab == 1]] - origin
+    return np.einsum("ij,ij->i", v[:, 0], np.cross(v[:, 1], v[:, 2])).sum() / 6
 
 
 def rigid_to(Xk, X0):
@@ -105,17 +118,18 @@ def closest_on_triangles(P, A, B, C):
 
 # ==================== step targets ====================
 def targets(cfg):
-    """Step targets: u_img of every endo / epi node -> OUTPUT_DIR/disp_constrain/targets.npz."""
+    """Step targets: u_img of every endo / epi node and the cavity volume of every frame, from the flattened tracked
+    surfaces -> OUTPUT_DIR/mesh/disp_targets.npz."""
     w = model.read_wall(cfg)
     pts = w["points"] / cfg.MM_PER_UNIT
-    X, tri, side, rigid = tracked(cfg)
+    X, tri, lab, info = flattened(cfg)
     ref = model.reference_frame(cfg)
     u_img = np.zeros((cfg.N_FRAMES, len(pts), 3))
     data = np.zeros(len(pts), bool)
     lines = []
-    for s, name in ((0, "endo"), (1, "epi")):
+    for s, name in ((1, "endo"), (2, "epi")):
         nodes = np.unique(w[name])
-        sel = np.where(side == s)[0]
+        sel = np.where(lab == s)[0]
         cand = sel[cKDTree(X[ref][tri[sel]].mean(1)).query(pts[nodes], 24)[1]]
         T = X[ref][tri[cand]]
         bary, d = closest_on_triangles(pts[nodes][:, None], T[..., 0, :], T[..., 1, :], T[..., 2, :])
@@ -128,18 +142,29 @@ def targets(cfg):
         data[nodes] = True
         lines.append(f"{name}: {len(nodes)} nodes, distance to the tracked t{ref} surface median {np.median(d[r, j]):.2f}, "
                      f"max {d[r, j].max():.2f} um")
-    np.savez_compressed(cfg.mesh / "disp_targets.npz", u_img=u_img, data_nodes=data, rigid_rotation_deg=rigid[:, 0],
-                        rigid_shift_um=rigid[:, 1], reference_frame=ref)
+    origin = np.load(cfg.mesh / "surface_cut" / "correspondence.npz")["plane_origin"]
+    vol = np.array([cavity_volume(X[k], tri, lab, origin) for k in range(cfg.N_FRAMES)])
+    ratio = vol / vol[ref]
+    np.savez_compressed(cfg.mesh / "disp_targets.npz", u_img=u_img, data_nodes=data, V_ratio=ratio,
+                        rigid_rotation_deg=info[:, 0], rigid_shift_um=info[:, 1], rim_height_um=info[:, 2],
+                        reference_frame=ref)
     mag = np.linalg.norm(u_img[:, data], axis=2) / cfg.MM_PER_UNIT
+    cut = model.frame_volumes(cfg)
     print("\n".join(lines) + f"\nimage displacement: median over the nodes up to {np.median(mag, 1).max():.2f} um; tracking "
-          f"rigid motion removed: up to {rigid[:, 0].max():.1f} deg", flush=True)
+          f"rigid motion removed: up to {info[:, 0].max():.1f} deg; rim height above the base plane before the flattening: "
+          f"up to {info[:, 2].max():.1f} um; cavity volume / reference frame {ratio.min():.4f}..{ratio.max():.4f} "
+          f"(not flattened {(cut / cut[ref]).min():.4f}..{(cut / cut[ref]).max():.4f})", flush=True)
 
 
 def load_targets(cfg):
+    """Image displacement u_img (frames, nodes, 3; mm) and cavity volume / reference frame (frames) of the step targets."""
     path = cfg.mesh / "disp_targets.npz"
     if not path.exists():
         raise FileNotFoundError(f"{path} missing: run the step targets first")
-    return np.load(path)["u_img"]
+    d = np.load(path)
+    if "V_ratio" not in d:
+        raise ValueError(f"{path}: written by an older version (no base flattening): run the step targets again")
+    return d["u_img"], d["V_ratio"]
 
 
 # ==================== step compare ====================
@@ -171,30 +196,46 @@ def outward(x, tri):
     return tri if np.einsum("ij,ij->i", v[:, 0], np.cross(v[:, 1], v[:, 2])).sum() > 0 else tri[:, ::-1]
 
 
+def fan_closed(tri, n_vertices):
+    """Triangles of an open surface with one boundary loop closed by a fan to an added vertex (index n_vertices), and the
+    loop vertices (the added vertex is their centroid)."""
+    d = np.concatenate((tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [2, 0]]))
+    e, c = np.unique(np.sort(d, 1), axis=0, return_counts=True)
+    rim = {tuple(r) for r in e[c == 1]}
+    d = d[np.array([tuple(r) in rim for r in np.sort(d, 1)])]
+    return np.vstack((tri, np.c_[d[:, 1], d[:, 0], np.full(len(d), n_vertices)])), np.unique(d)
+
+
 class Tracking:
-    """The tracked surfaces of every frame (closed endocardium and epicardium, rigidly aligned as the targets) and the
-    wall Dice of a simulated frame."""
+    """The flattened tracked surfaces of every frame (endocardium and epicardium, each closed by a fan over its rim in the
+    base plane) and the wall Dice of a simulated frame."""
 
     def __init__(self, cfg):
         self.cfg = cfg
         w = model.read_wall(cfg)
-        self.bnd, self.pts = w["bnd"], w["points"] / cfg.MM_PER_UNIT
-        self.X, tri, side, _ = tracked(cfg)
+        self.bnd, self.pts, self.n_out, self.base_nodes = w["bnd"], w["points"] / cfg.MM_PER_UNIT, w["n_out"], w["base_nodes"]
+        self.X, tri, lab, _ = flattened(cfg)
         ref = model.reference_frame(cfg)
-        self.endo_f, self.epi_f = outward(self.X[ref], tri[side == 0]), outward(self.X[ref], tri[side == 1])
-        self.n_out = w["n_out"]
-        self.level = float(np.median(self.pts[w["base_nodes"]] @ self.n_out))
+        self.closed = {}  # surface -> (outward closed triangles, rim vertices)
+        for s, name in ((1, "endo"), (2, "epi")):
+            f, rim = fan_closed(tri[lab == s], self.X.shape[1])
+            self.closed[name] = (outward(np.vstack((self.X[ref], self.X[ref][rim].mean(0))), f), rim)
+        self.level = float(np.median(self.pts[self.base_nodes] @ self.n_out))
+
+    def surface(self, k, name):
+        """Closed tracked surface `name` (endo, epi) of frame k: vertices and outward triangles."""
+        f, rim = self.closed[name]
+        return np.vstack((self.X[k], self.X[k][rim].mean(0))), f
 
     def wall(self, k, q):
         """Mask of the points q inside the tracked wall of frame k."""
-        Xk = self.X[k]
-        return (signed_distance(Xk, self.epi_f, q) < 0) & (signed_distance(Xk, self.endo_f, q) > 0)
+        return (signed_distance(*self.surface(k, "epi"), q) < 0) & (signed_distance(*self.surface(k, "endo"), q) > 0)
 
     def dice(self, k, u_mm):
         x, Xk = self.pts + u_mm / self.cfg.MM_PER_UNIT, self.X[k]
         lo, hi = np.minimum(x.min(0), Xk.min(0)) - 2, np.maximum(x.max(0), Xk.max(0)) + 2
         q = np.stack(np.meshgrid(*[np.arange(lo[i], hi[i], DICE_VOXEL_UM) for i in range(3)], indexing="ij"), -1).reshape(-1, 3)
-        q = q[self.level - q @ self.n_out >= self.cfg.BASE_EXCLUDE_UM]
+        q = q[self.level - q @ self.n_out >= 0]  # below the base plane
         q = q[(cKDTree(x).query(q, distance_upper_bound=NEAR_UM)[0] < np.inf) |
               (cKDTree(Xk).query(q, distance_upper_bound=NEAR_UM)[0] < np.inf)]
         sim, trk = signed_distance(x, self.bnd, q) < 0, self.wall(k, q)
