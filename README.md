@@ -167,17 +167,17 @@ curl -LO https://github.com/SiyuMU/HeartFEM_Mu/releases/download/v1.1.0/heartfem
 ```bash
 tar -xzf heartfem_mu_v1.1.0_outputs_windkessel_FE_two_fibers_endo.tar.gz
 ```
-(checksum in `SHA256SUMS_v1.1.0` of that release). The example `volume_constrain/FE_one_fiber_disp`, added in v1.2.0,
-has its large files in one archive of the release [v1.2.0](https://github.com/SiyuMU/HeartFEM_Mu/releases/tag/v1.2.0):
+(checksum in `SHA256SUMS_v1.1.0` of that release). The example `volume_constrain/FE_one_fiber_disp` has its large
+files in one archive of the release [v1.3.0](https://github.com/SiyuMU/HeartFEM_Mu/releases/tag/v1.3.0):
 ```bash
-curl -LO https://github.com/SiyuMU/HeartFEM_Mu/releases/download/v1.2.0/heartfem_mu_v1.2.0_outputs_volume_constrain_FE_one_fiber_disp.tar.gz
+curl -LO https://github.com/SiyuMU/HeartFEM_Mu/releases/download/v1.3.0/heartfem_mu_v1.3.0_outputs_volume_constrain_FE_one_fiber_disp.tar.gz
 ```
 ```bash
-tar -xzf heartfem_mu_v1.2.0_outputs_volume_constrain_FE_one_fiber_disp.tar.gz
+tar -xzf heartfem_mu_v1.3.0_outputs_volume_constrain_FE_one_fiber_disp.tar.gz
 ```
-(checksum in `SHA256SUMS_v1.2.0` of that release; it holds the outputs of v1.2.0, `DISP_WEIGHT` 30 kPa/mm without the base
-flattening: `python main.py` recomputes the current ones). The examples `unloading/*` are complete in the
-repository. Without the archives, `python main.py` recomputes every file from `input/`.
+(checksum in `SHA256SUMS_v1.3.0` of that release; the archive of v1.2.0 holds the outputs of the displacement constraint
+of v1.2.0, which v1.3.0 replaces). The examples `unloading/*` are complete in the repository. Without the archives,
+`python main.py` recomputes every file from `input/`.
 
 <!-- EXAMPLES TABLE -->
 | example | fibers | main result |
@@ -222,8 +222,11 @@ cavity volume V0 0.6771818 nL:
 | [v1.0.0](https://github.com/SiyuMU/HeartFEM_Mu/releases/tag/v1.0.0) | 2026-10-26 | the library and 12 examples: `volume_constrain`, `windkessel`, `invert_para` x FE / PINN x one / two fiber families |
 | [v1.1.0](https://github.com/SiyuMU/HeartFEM_Mu/releases/tag/v1.1.0) | 2026-10-27 | wall of myocardium + endocardium (`WALL = "myo_endo"`, windkessel FE); example `windkessel/FE_two_fibers_endo` |
 | [v1.2.0](https://github.com/SiyuMU/HeartFEM_Mu/releases/tag/v1.2.0) | 2026-11-04 | task `unloading` (FE; examples `unloading/FE_one_fiber`, `FE_two_fibers`); displacement constraint of the volume_constrain FE (`DISP_CONSTRAIN`); example `volume_constrain/FE_one_fiber_disp` |
+| [v1.3.0](https://github.com/SiyuMU/HeartFEM_Mu/releases/tag/v1.3.0) | 2026-11-10 | displacement constraint replaced: targets and cavity volumes from the base-flattened tracked surfaces, wall Dice below the base plane, `disp_compare.mp4` with three long-axis sections and one short-axis section; example `volume_constrain/FE_one_fiber_disp` at `DISP_WEIGHT` 300 kPa/mm |
 
-Each version keeps the examples and results of the previous ones unchanged.
+Each version keeps the examples and results of the previous ones unchanged, except v1.3.0 for
+`volume_constrain/FE_one_fiber_disp`: its method and results are new (those of v1.2.0 are in the tag v1.2.0 and its
+archive).
 
 ## Reproducibility
 - **Preprocessing** is deterministic. gmsh meshes the surface patches in parallel, so the tetrahedra depend on the

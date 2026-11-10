@@ -30,9 +30,8 @@ Code: `../../../heartfem_mu/disp_constrain.py` (steps targets, compare), the ima
 
 The git repository holds the small files of `output/` (figures, movies, tables, json, logs). The large ones (`mesh/`
 with `disp_targets.npz`, every `.vtu` and `.npz` file) are in the release archive
-`heartfem_mu_v1.2.0_outputs_volume_constrain_FE_one_fiber_disp.tar.gz` (see Examples in `../../../README.md`; it holds
-the outputs of v1.2.0, `DISP_WEIGHT` 30 kPa/mm without the base flattening); `python main.py` recomputes all of them from
-`input/`.
+`heartfem_mu_v1.3.0_outputs_volume_constrain_FE_one_fiber_disp.tar.gz` (see Examples in `../../../README.md`);
+`python main.py` recomputes all of them from `input/`.
 
 ## Run
 ```bash
