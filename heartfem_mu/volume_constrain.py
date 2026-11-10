@@ -5,7 +5,7 @@ ONSET_AFTER_ED_FRAMES.
     FE    step solve (MPI): heartFEM's volume-controlled formulation (fe.VolumeProblem); the frames are solved in time
           order from the reference frame, each starting from the previous solution. Optional (DISP_CONSTRAIN = True):
           the displacement constraint of disp_constrain.py, the wall pulled toward the tracked wall with the weight
-          DISP_WEIGHT (steps targets before solve, compare after it).
+          DISP_WEIGHT (steps targets before solve, compare after it); V_img,k then from the base-flattened cut surfaces.
     PINN  steps train, solve: with t_k fixed, the cavity pressure P_k solves V_PINN(P, t_k) = V_k (bisection on [0, P_MAX];
           V is monotonic in P); the displacement is the network output at (P_k, t_k). Stresses: F from the P2 displacement
           at the quadrature points; hydrostatic pressure p recovered as the P1 field that best balances the P2 weak
@@ -32,17 +32,19 @@ def fe_cycle(cfg):
     N = cfg.N_FRAMES
     t_a = model.activation(cfg, np.arange(N))
     ref, ratio = g["reference_frame"], g["V_ratio"]
+    image = None
+    if getattr(cfg, "DISP_CONSTRAIN", False):  # displacement constraint (disp_constrain.py, step targets): image
+        from . import disp_constrain           # displacement and volumes of the base-flattened tracked surfaces
+        u_img, ratio = disp_constrain.load_targets(cfg)
+        image = (float(cfg.DISP_WEIGHT), u_img)
     fe.log(f"mesh: {len(g['points'])} nodes, {len(g['cells'])} tets; reference frame t{ref}; "
            f"V/V0 {ratio.min():.4f}..{ratio.max():.4f}")
+    if image is not None:
+        fe.log(f"displacement constraint: weight {cfg.DISP_WEIGHT} kPa/mm; volumes of the base-flattened tracked surfaces")
     dt = cfg.BCL_MS / N
     x = np.empty(N)  # activation time unwrapped along the solve order (reference frame first)
     for i in range(N):
         x[(ref + i) % N] = t_a[ref] + i * dt
-    image = None
-    if getattr(cfg, "DISP_CONSTRAIN", False):  # displacement constraint (disp_constrain.py, step targets)
-        from . import disp_constrain
-        image = (float(cfg.DISP_WEIGHT), disp_constrain.load_targets(cfg))
-        fe.log(f"displacement constraint: weight {cfg.DISP_WEIGHT} kPa/mm")
     states, info = fe.solve_states(
         cfg, g, R, mesh_h5, [(ref + i) % N for i in range(N)], x, lambda pb, k: pb.V0 * ratio[k], cfg.output, "frame",
         describe=lambda k, V: f"  t{k:02d}  V/V0 {ratio[k]:.4f}  t_a {t_a[k]:5.1f} ms",

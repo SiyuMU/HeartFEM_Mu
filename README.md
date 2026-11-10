@@ -20,9 +20,10 @@ The wall is the myocardium. The windkessel FE mode can also solve a wall of myoc
 surface, solved together with the myocardium (example `windkessel/FE_two_fibers_endo`).
 
 The volume_constrain FE mode can also pull the wall toward the tracked wall (`DISP_CONSTRAIN = True`): a traction
-`DISP_WEIGHT (u_img - u)` on the endocardium and epicardium, `u_img` the tracked displacement; the run adds the movie
-`disp_compare.mp4`: the simulated wall over the tracked wall, with the wall Dice of every frame (example
-`volume_constrain/FE_one_fiber_disp`).
+`DISP_WEIGHT (u_img - u)` on the endocardium and epicardium, `u_img` the tracked displacement; the tracked surfaces are
+rigidly aligned and their base flattened into the base plane of the model (targets and cavity volumes from them); the
+run adds the movie `disp_compare.mp4`: the simulated wall over the tracked wall on three long-axis sections and one
+short-axis section, with the wall Dice of every frame (example `volume_constrain/FE_one_fiber_disp`).
 
 The FE solves a nonlinear problem per state (MPI on the CPU). The PINN is trained once per geometry, without FE or
 image data, by minimizing the potential energy of the same mechanics; it then returns the equilibrium displacement of
@@ -45,7 +46,7 @@ HeartFEM_Mu/
 │   ├── fe.py              FE solver (dolfin): volume-driven problem (volume_constrain, windkessel), pressure-driven problem (invert_para, unloading)
 │   ├── pinn.py            PINN solver (torch): material laws, P2 discretization, the networks, energies, training
 │   ├── volume_constrain.py   task: P-V cycle (FE, PINN)
-│   ├── disp_constrain.py  displacement constraint of the volume_constrain FE (DISP_CONSTRAIN): tracked targets, wall Dice against the tracking
+│   ├── disp_constrain.py  displacement constraint of the volume_constrain FE (DISP_CONSTRAIN): base-flattened tracking, targets, volumes, wall Dice
 │   ├── windkessel.py      task: P-V-t table (FE sweep, PINN), heartFEM table files, ngspice circuit, replay
 │   ├── invert_para.py     task: image misfit, search for C and T_MAX (FE, PINN), evaluation
 │   ├── unloading.py       task: unloaded geometry and C from the ED wall (topology, local-frame helper, result files)
@@ -118,8 +119,9 @@ python main.py --from solve     # this step and the following ones
 
 With `WALL = "myo_endo"` (windkessel FE) the step `endo_layer` (the endocardial layer grown on the mesh) follows
 `preprocess` (`ENDO_GROW = True`), or `preprocess` meshes both layers of the input surface (`ENDO_GROW = False`).
-With `DISP_CONSTRAIN = True` (volume_constrain FE) the steps are preprocess, targets (the tracked displacement of the
-wall nodes), solve, compare (the movie disp_compare.mp4, simulation over the tracking, with the wall Dice), plot.
+With `DISP_CONSTRAIN = True` (volume_constrain FE) the steps are preprocess, targets (base-flattened tracking: the
+displacement of the wall nodes and the cavity volumes), solve, compare (the wall Dice and the movie disp_compare.mp4,
+simulation over the tracking on four sections), plot.
 
 ## Settings
 Each example's `params.py` holds every setting of its mode; `main.py` refuses a `params.py` with a missing or unknown
@@ -137,7 +139,7 @@ the mode and the compute resources:
 | `GPU` | PINN: the GPU (index of `nvidia-smi`); `None`: the CPU |
 | `CONDA_ENV`, `CONDA_ENV_FENICS` | the two conda environments |
 | `MESH_THREADS` | (preprocess section) threads of the gmsh mesher; the mesh depends on it (see Reproducibility) |
-| `DISP_CONSTRAIN` | (optional, last section) `False`: off (also when absent, as in every example but one); `True`: the wall pulled toward the tracked wall, volume_constrain FE only (every other mode refuses it), with the setting `DISP_WEIGHT` (kPa/mm: the traction per um off the tracked wall is DISP_WEIGHT x 1e-3 kPa); see `examples/volume_constrain/FE_one_fiber_disp` |
+| `DISP_CONSTRAIN` | (optional, last section) `False`: off (also when absent, as in every example but one); `True`: the wall pulled toward the tracked wall (base flattened; also the cavity volumes come from it), volume_constrain FE only (every other mode refuses it), with the setting `DISP_WEIGHT` (kPa/mm: the traction per um off the tracked wall is DISP_WEIGHT x 1e-3 kPa); see `examples/volume_constrain/FE_one_fiber_disp` |
 | `WALL` | (optional, wall section) `"myo"`: the myocardium (also when `WALL` is absent, as in every example but one); `"myo_endo"`: myocardium + endocardial layer, windkessel FE only (every other mode refuses it), with the settings `ENDO_GROW` (`True`: the layer grown from the myocardial mesh, `ENDO_THICKNESS_UM`, `ENDO_SUBLAYERS`; `False`: the input surface has both layers), `ENDO_PRESSURE_JUMP`, `ENDO_MATERIAL` (see `examples/windkessel/FE_two_fibers_endo`) |
 
 All other settings (geometry, fibers, material, activation, circulation, misfit, network, training) and their sources
@@ -173,7 +175,8 @@ curl -LO https://github.com/SiyuMU/HeartFEM_Mu/releases/download/v1.2.0/heartfem
 ```bash
 tar -xzf heartfem_mu_v1.2.0_outputs_volume_constrain_FE_one_fiber_disp.tar.gz
 ```
-(checksum in `SHA256SUMS_v1.2.0` of that release). The examples `unloading/*` are complete in the
+(checksum in `SHA256SUMS_v1.2.0` of that release; it holds the outputs of v1.2.0, `DISP_WEIGHT` 30 kPa/mm without the base
+flattening: `python main.py` recomputes the current ones). The examples `unloading/*` are complete in the
 repository. Without the archives, `python main.py` recomputes every file from `input/`.
 
 <!-- EXAMPLES TABLE -->
@@ -203,7 +206,7 @@ Displacement constraint (`DISP_CONSTRAIN = True`), the wall pulled toward the tr
 
 | example | fibers | main result |
 |---|---|---|
-| `volume_constrain/FE_one_fiber_disp` | one fiber family, `DISP_WEIGHT` 30 kPa/mm | wall Dice vs tracking, mean 0.772 (without the constraint 0.625); peak P 1.566 kPa (without 1.250) |
+| `volume_constrain/FE_one_fiber_disp` | one fiber family, `DISP_WEIGHT` 300 kPa/mm | wall Dice vs base-flattened tracking, mean 0.856 (`DISP_WEIGHT` 0: 0.618); peak P 1.710 kPa (`DISP_WEIGHT` 0: 0.972); image force 66 % of the peak P |
 
 Unloading (FE), from an ED wall made by inflating the t12 mesh (`input/ed.stl`), P_ED 0.1813 kPa and the unloaded
 cavity volume V0 0.6771818 nL:

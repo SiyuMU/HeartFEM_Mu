@@ -60,7 +60,8 @@ MOVIE_FPS = 6
 BASE_EXCLUDE_UM = 10.0           # wall means in summary.csv skip cells this close to the base (boundary-condition stress)
 
 # ---- displacement constraint (heartfem_mu/disp_constrain.py; optional, volume_constrain FE only; absent = False)
-DISP_CONSTRAIN = True             # True: the wall is pulled toward the tracked wall (input/t*.stl): traction
-                                  # DISP_WEIGHT (u_img - u) on the endocardium and epicardium; steps targets, compare
-DISP_WEIGHT = 30.0                # kPa/mm: 1 um off the tracked wall -> 0.03 kPa. Larger: closer to the tracking, but a
+DISP_CONSTRAIN = True             # True: the wall is pulled toward the tracked wall (the cut surfaces of output/mesh,
+                                  # base flattened): traction DISP_WEIGHT (u_img - u) on the endocardium and epicardium,
+                                  # cavity volumes of the flattened surfaces; steps targets, compare
+DISP_WEIGHT = 300.0               # kPa/mm: 1 um off the tracked wall -> 0.3 kPa. Larger: closer to the tracking, but a
                                   # larger image force (a force the real heart does not have) and a higher cavity pressure
